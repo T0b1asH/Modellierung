@@ -42,6 +42,13 @@ def erstelle_snapshots(years,freq):
         snapshots = snapshots.append(period)
     return snapshots
 
+''' 
+def strompreis(years):
+    for year in years:
+        anfangspreis = 0.35
+        strompreis = anfangspreis * (1 + 0.03)**year
+    return strompreis
+'''
 # Netzwerk aufbauen
 def erstelle_network(years, snapshots, df_netzlast, df_pv):
     network = pypsa.Network()
@@ -53,10 +60,7 @@ def erstelle_network(years, snapshots, df_netzlast, df_pv):
                 name = "Gas",
                 co2_emissions = co2_emissions_gas
                 )
-    network.add("Carrier",
-                name = "Strom",
-                co2_emissions = co2_emissions_strom
-                )
+
     network.add("Carrier",
                 name = "PV",
                 co2_emissions = 0
@@ -68,37 +72,35 @@ def erstelle_network(years, snapshots, df_netzlast, df_pv):
     )
 
     network.add(
+        "Bus",
+        name = "Wasserstoff"
+    )
+
+    network.add(
         "Load",
         name="el_verbrauch",
         bus="elektrisches Netz",
         p_set= list(df_netzlast["Netzlast [kW]"])
     )
 
-    network.add(
-        "Generator",
-        name="Netzanschluss",
-        bus="elektrisches Netz",
-        p_nom=np.inf,
-        p_nom_extendable=True,
-        marginal_cost=0.35,
-        carrier = "Strom"
-    )
-
-
     # Erzeuger pro Jahr hinzufügen
     for year in years:
+        network.add("Carrier",
+                    name="Strom_{}".format(year),
+                    co2_emissions=407*(1-0.3)**(year-2025)
+                    )
+
         network.add(
             "Generator",
-            name = "PV_{}".format(year),
-            bus = "elektrisches Netz",
-            #p_nom_max = 15,
-            p_nom_extendable = True,
-            p_max_pu = list(df_pv["Leistung [kW]"]),
-            marginal_cost = 0.05,
-            capital_cost = 1400,
+            name="Netzanschluss_{}".format(year),
+            bus="elektrisches Netz",
+            #p_nom_max=100000,
+            p_nom_extendable=True,
+            #capital_cost=10000, sau schwer zu implementieren #GPT sagt häufig sind das Pausdchalpreise, in dem Fall zahlt man 10.000 Euro für 100MW
+            marginal_cost=0.35 * (1 + 0.03)**(year-2025),
             build_year=year,
-            lifetime = 2,
-            carrier = "PV"
+            lifetime=1,
+            carrier="Strom_{}".format(year),
         )
 
         network.add(
@@ -115,14 +117,144 @@ def erstelle_network(years, snapshots, df_netzlast, df_pv):
             carrier = "Gas"
         )
 
+        # PV Aufdach
+        network.add(
+            "Generator",
+            name="PV_Aufdach_{}".format(year),
+            bus="elektrisches Netz",
+            p_max_pu=list(df_pv["Leistung [kW]"]),
+            p_nom_extendable=True,
+            #p_nom_max=500,
+            # maximal installierbare Leistung auf der verfügbaren Fläche; muss als Constraint, damit nicht jedes Jahr das p_nom_max neu installiert werden kann
+            #p_nom_min=50,
+            # mindestens zu installierende Leistung, weil winzige PV-Anlagen für den Maßstab keinen Sinn ergeben
+            build_year=year,
+            lifetime=2,
+            capital_cost=100,
+            marginal_cost=0.01
+        )
+        '''
+        # PV extern via PPA
+        network.add(
+            "Generator",
+            name="PV_extern_".format(year),
+            bus="elektrisches Netz",
+            p_max_pu=df_pv_ppa["pv_pu"].values,
+            p_nom_extendable=True,
+            build_year=year,
+            lifetime=20,
+            marginal_cost=0.02  # nur marginal_cost wegen PPA
+        )
+
+        # Wind onshore
+        network.add(
+            "Generator",
+            name="Wind_onshore_".format(year),
+            bus="elektrisches Netz",
+            p_max_pu=df_wind_ppa["wind_pu"].values,
+            p_nom_extendable=True,
+            build_year=year,
+            lifetime=25,
+            marginal_cost=0.02  # nur marginal_cost wegen PPA
+        )
+
+        # Wind offshore
+        network.add(
+            "Generator",
+            name="Wind_offshore_".format(year),
+            bus="elektrisches Netz",
+            p_max_pu=df_wind_ppa["wind_pu"].values,
+            p_nom_extendable=True,
+            build_year=year,
+            lifetime=25,
+            marginal_cost=0.02  # nur marginal_cost wegen PPA
+        )
+        '''
+        # Batteriespeicher
+        network.add(
+            "StorageUnit",
+            name="Batterie_{}".format(year),
+            bus="elektrisches Netz",
+            p_nom_extendable=True,
+            build_year=year,
+            lifetime=2,
+            capital_cost=300,
+            #efficiency_store=0.95,
+            #efficiency_dispatch=0.95,
+            #max_hours=4
+        )
+
+        # PEM-Elektrolyse
+        network.add(
+            "Link",
+            name="PEM_".format(year),
+            bus0="elektrisches Netz",
+            bus1="Wasserstoff",
+            p_nom_extendable=True,
+            efficiency=0.7,
+            build_year=year,
+            lifetime=2,
+            capital_cost=900
+        )
+
+        # HT-Elektrolyse (Strom + Wärme)
+        network.add(
+            "Link",
+            name="HT_".format(year),
+            bus0="elektrisches Netz",
+            bus1="Wasserstoff",
+            p_nom_extendable=True,
+            efficiency=0.8,
+            build_year=year,
+            lifetime=2,
+            capital_cost=1200
+            # nur aktiv, wenn Lichbogenofen läuft (z.B. auf min. 80%)
+        )
+
+        # H2-Speicher
+        network.add(
+            "Store",
+            name="wasserstoffspeicher",
+            bus="Wasserstoff",
+            e_nom_extendable=True,
+            build_year=year,
+            lifetime=2,
+            capital_cost=20
+            #e_cyclic=True
+        )
+
+        # H2-Verbraucher
+        network.add(
+            "Load",
+            name="H2_brenner",
+            bus="Wasserstoff",
+            p_set=0
+        )
+
+        network.add(
+            "Load",
+            name="H2_dri",
+            bus="Wasserstoff",
+            p_set=0
+        )
+        '''
+        # Last Lichtbogenofen ab in die Schleife
+        network.add(
+            "Load",
+            name="Lichtbogenofen",
+            bus="elektrisches Netz",
+            p_set=df_load["Lichtbogenofen [kW]"].values
+        )
+        '''
         network.add(
             "GlobalConstraint",
             "emission_limit_{}".format(year),
             carrier_attribute="co2_emissions",
             sense="<=",
-            constant=4000000.0
+            #constant=2000000,
+            constant=250000 * (1 - 0.1) ** (year - 2025),
+            investment_period = year
         )
-
     return network
 
 
@@ -179,14 +311,27 @@ def main():
     standard_co2_emissions = round((network.generators_t.p.sum() / network.generators.efficiency *
                                     pd.merge(df_carrier, df_generators, left_index=True, right_on='carrier')
                                     ['co2_emissions'])).sum()
-    print(standard_co2_emissions)
+
     print(network.generators)
     print(network.global_constraints)
-    '''
-    for co2_limit in np.flip(np.arange(0, 1, 0.1)):
-        print(co2_limit)
-        network.global_constraints.loc['co2-limit', 'constant'] = co2_limit * standard_co2_emissions
-    '''
+    print(network.generators_t.p)
+    print(network.generators[["marginal_cost", "carrier", "build_year"]])
+    print(network.carriers[["co2_emissions"]])
+    print("Gesamtkosten vorher: 15322.45 €/a")
+    print(f"Gesamtkosten: {network.objective:.2f} €/a")
+
+    carrier_emissions = network.carriers["co2_emissions"]  # kg/MWh
+    emission_factors = network.generators["carrier"].map(carrier_emissions)
+    emissions_kg = (network.generators_t.p * emission_factors).sum().sum()
+    #emissions_t = emissions_kg / 1000
+    print(f"Gesamte CO₂-Emissionen: {emissions_kg:.2f} kgCO₂")
+
+    print(network.generators[["carrier", "marginal_cost", "build_year", "p_nom_opt"]])
+    print(network.carriers[["co2_emissions"]])
+    print(network.global_constraints[["sense", "carrier_attribute", "constant"]])
 
 if __name__ == "__main__":
     main()
+
+
+
