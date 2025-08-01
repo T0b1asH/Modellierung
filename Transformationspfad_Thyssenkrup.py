@@ -22,7 +22,7 @@ def lade_daten(years):
         [pd.read_csv("Inputdaten/data_PyPSA_1.csv", nrows=8760)] * len(years),
         ignore_index=True
     )
-
+#überprüfen ob sich die Last verändert über die Jahre oder ob sie tasächlich nur hinten angefügt wird
     df_pv = pd.concat(
         [pd.read_csv("Inputdaten/PV_Erzeugung_1kWp.csv", sep=";", decimal=',', skiprows=3)] * len(years),
         ignore_index=True
@@ -259,7 +259,7 @@ def erstelle_network(years, snapshots, df_netzlast, df_pv):
 
 
 def main():
-    years = [2025 + i for i in range(6)]
+    years = [2025 + i for i in range(1)]
     freq = 1
     df_netzlast, df_pv = lade_daten(years)
     snapshots = erstelle_snapshots(years, freq)
@@ -325,11 +325,14 @@ def main():
     emissions_kg = (network.generators_t.p * emission_factors).sum().sum()
     #emissions_t = emissions_kg / 1000
     print(f"Gesamte CO₂-Emissionen: {emissions_kg:.2f} kgCO₂")
+    network.generators_t.p.plot()
+    plt.show()
+    print(f"PV_Aufdachdeckungsgrad: {round(network.generators_t.p['PV_Aufdach_2025'].sum()/network.loads_t.p['el_verbrauch'].sum(),3)*100} %")
+    print(f"Netz_Deckungsgrad: {round(network.generators_t.p['Netzanschluss_2025'].sum()/network.loads_t.p['el_verbrauch'].sum(),3)*100} %")
 
-    print(network.generators[["carrier", "marginal_cost", "build_year", "p_nom_opt"]])
-    print(network.carriers[["co2_emissions"]])
-    print(network.global_constraints[["sense", "carrier_attribute", "constant"]])
-
+    print(round(network.generators_t.p["PV_Aufdach_2025"].sum()))
+    print(round(network.generators_t.p["Netzanschluss_2025"].sum()))
+    print(round(network.loads_t.p["el_verbrauch"].sum()))
 if __name__ == "__main__":
     main()
 
