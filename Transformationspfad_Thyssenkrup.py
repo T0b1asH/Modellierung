@@ -4,30 +4,48 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from sympy.physics.units import years
 
+
 #Variablen definieren
 years = [2025 + i for i in range(4)]
 freq = 1
 
-co2_emissions_gas = 358 #kg/MWh https://www.volker-quaschning.de/datserv/CO2-spez/index_e.php
-co2_emissions_strom = 407 #kg/MWh
+co2_emissionen_gas = 358 #kg/MWh https://www.volker-quaschning.de/datserv/CO2-spez/index_e.php
+co2_emissionen_strom = 407 #kg/MWh
+
+aktuelle_co2_emissionen = 400000
+stahlproduktion = {2025:10000, 2026:11000, 2027:12000, 2028:13000, 2029:14000}
+stromverbrauch_pro_kg_stahl = 0.5 #kWh/kg_stahl
 
 # Inputdaten laden und für alle Jahre duplizieren (aktuell ändern sich die verbräuche nicht)
 def lade_daten(years):
-    df_haus = pd.concat(
-        [pd.read_csv("Inputdaten/htw_P.csv")] * len(years),
-        ignore_index=True
-    )
+    df_netzlast = pd.read_csv("Inputdaten/data_PyPSA_1.csv", nrows=8760)
 
-    df_netzlast = pd.concat(
-        [pd.read_csv("Inputdaten/data_PyPSA_1.csv", nrows=8760)] * len(years),
-        ignore_index=True
-    )
-#überprüfen ob sich die Last verändert über die Jahre oder ob sie tasächlich nur hinten angefügt wird
     df_pv = pd.concat(
         [pd.read_csv("Inputdaten/PV_Erzeugung_1kWp.csv", sep=";", decimal=',', skiprows=3)] * len(years),
         ignore_index=True
     )
     return df_netzlast, df_pv
+
+
+def daten_anpassen(stahlproduktion,df_netzlast,stromverbrauch_pro_kg_stahl):
+    alle_co2_emissionen = {}
+    alle_co2_emissionen_strom = {}
+    stromlast_liste = []
+    df_netzlast_normiert = df_netzlast["Netzlast [kW]"] / df_netzlast["Netzlast [kW]"].sum()
+
+    for year in years:
+        funktion = (-(aktuelle_co2_emissionen/(len(years)-1)))*(year-2025) + aktuelle_co2_emissionen
+        alle_co2_emissionen[year] = funktion
+
+        funktion_strom = (-(co2_emissionen_strom/(len(years)-1)))*(year-2025) + co2_emissionen_strom
+        alle_co2_emissionen_strom[year] = funktion_strom
+
+        stromlast_pro_jahr = df_netzlast_normiert.copy() * int(stahlproduktion[year] * stromverbrauch_pro_kg_stahl)
+        stromlast_liste.append(stromlast_pro_jahr)
+
+    df_netzlast_alle_jahre = pd.concat(stromlast_liste, ignore_index = True)
+
+    return df_netzlast_alle_jahre,alle_co2_emissionen,alle_co2_emissionen_strom
 
 # Snapshot-Zeiten erzeugen
 #https://pypsa.readthedocs.io/en/stable/examples/multi-investment-optimisation.html
@@ -41,25 +59,21 @@ def erstelle_snapshots(years,freq):
         )
         snapshots = snapshots.append(period)
     return snapshots
+df_netzlast, df_pv = lade_daten(years)
+snapshots = erstelle_snapshots(years,freq)
+df_netzlast_alle_jahre,alle_co2_emissionen,alle_co2_emissionen_strom = daten_anpassen(stahlproduktion,df_netzlast,stromverbrauch_pro_kg_stahl)
 
-''' 
-def strompreis(years):
-    for year in years:
-        anfangspreis = 0.35
-        strompreis = anfangspreis * (1 + 0.03)**year
-    return strompreis
-'''
+print(df_netzlast_alle_jahre)
+print(len(snapshots))
+
+
 # Netzwerk aufbauen
-def erstelle_network(years, snapshots, df_netzlast, df_pv):
+def erstelle_network(years, snapshots, df_netzlast,df_netzlast_alle_jahre, df_pv, all_co2_emissions, all_co2_emissions_strom, stahlproduktion, stromverbrauch_pro_kg_stahl):
     network = pypsa.Network()
     network.snapshots = pd.MultiIndex.from_arrays([snapshots.year, snapshots])
     network.investment_periods = years
 
     #----Komponenten----
-    network.add("Carrier",
-                name = "Gas",
-                co2_emissions = co2_emissions_gas
-                )
 
     network.add("Carrier",
                 name = "PV",
@@ -80,7 +94,7 @@ def erstelle_network(years, snapshots, df_netzlast, df_pv):
         "Load",
         name="el_verbrauch",
         bus="elektrisches Netz",
-        p_set= list(df_netzlast["Netzlast [kW]"])
+        p_set= df_netzlast_alle_jahre
     )
 
     # Erzeuger pro Jahr hinzufügen
@@ -88,7 +102,7 @@ def erstelle_network(years, snapshots, df_netzlast, df_pv):
         network.add("Carrier",
                     name="Strom_{}".format(year),
                     co2_emissions=407*(1-0.3)**(year-2025)
-                    )
+        )
 
         network.add(
             "Generator",
@@ -103,19 +117,6 @@ def erstelle_network(years, snapshots, df_netzlast, df_pv):
             carrier="Strom_{}".format(year),
         )
 
-        network.add(
-            "Generator",
-            name = "Gas_BHKW_{}".format(year),
-            bus = "elektrisches Netz",
-            #p_nom_max = 10,
-            p_nom_extendable = True,
-            marginal_cost = 0.09,
-            capital_cost = 2000,
-            efficiency = 0.3,
-            build_year = year,
-            lifetime = 1,
-            carrier = "Gas"
-        )
 
         # PV Aufdach
         network.add(
@@ -181,7 +182,7 @@ def erstelle_network(years, snapshots, df_netzlast, df_pv):
             capital_cost=300,
             #efficiency_store=0.95,
             #efficiency_dispatch=0.95,
-            #max_hours=4
+            max_hours=4
         )
 
         # PEM-Elektrolyse
@@ -251,19 +252,22 @@ def erstelle_network(years, snapshots, df_netzlast, df_pv):
             "emission_limit_{}".format(year),
             carrier_attribute="co2_emissions",
             sense="<=",
-            #constant=2000000,
-            constant=250000 * (1 - 0.1) ** (year - 2025),
+            #constant=all_co2_emissions[year],
+            constant = 400000,
             investment_period = year
         )
     return network
 
 
 def main():
-    years = [2025 + i for i in range(1)]
-    freq = 1
     df_netzlast, df_pv = lade_daten(years)
     snapshots = erstelle_snapshots(years, freq)
-    network = erstelle_network(years, snapshots, df_netzlast, df_pv)
+    df_netzlast_alle_jahre, alle_co2_emissionen, alle_co2_emissionen_strom = daten_anpassen(stahlproduktion, df_netzlast,stromverbrauch_pro_kg_stahl)
+    df_netzlast_alle_jahre.index = pd.MultiIndex.from_arrays(
+        [snapshots.year, snapshots],
+        names=["period", "snapshot"]
+    )
+    network = erstelle_network(years, snapshots, df_netzlast,df_netzlast_alle_jahre, df_pv, alle_co2_emissionen, alle_co2_emissionen_strom,stahlproduktion, stromverbrauch_pro_kg_stahl)
 
 
     # Optimierung durchführen
@@ -291,6 +295,27 @@ def main():
     )
     plt.tight_layout()
     plt.show()
+
+    s = "StorageUnit"
+    df = pd.concat(
+        {
+            period: network.get_active_assets(s, period) * network.static(s).p_nom_opt
+            for period in network.investment_periods
+        },
+        axis=1,
+    )
+    df.T.plot.bar(
+        stacked=True,
+        edgecolor="white",
+        width=1,
+        ylabel="Capacity",
+        xlabel="Investment Period",
+        rot=0,
+        figsize=(10, 5),
+    )
+    plt.tight_layout()
+    plt.show()
+
     '''
     df_g = network.generators_t.p.sum(axis=0).T
     df_g.T.plot.bar(
@@ -313,6 +338,7 @@ def main():
                                     ['co2_emissions'])).sum()
 
     print(network.generators)
+    print(network.loads)
     print(network.global_constraints)
     print(network.generators_t.p)
     print(network.generators[["marginal_cost", "carrier", "build_year"]])
@@ -325,14 +351,23 @@ def main():
     emissions_kg = (network.generators_t.p * emission_factors).sum().sum()
     #emissions_t = emissions_kg / 1000
     print(f"Gesamte CO₂-Emissionen: {emissions_kg:.2f} kgCO₂")
-    network.generators_t.p.plot()
-    plt.show()
+
     print(f"PV_Aufdachdeckungsgrad: {round(network.generators_t.p['PV_Aufdach_2025'].sum()/network.loads_t.p['el_verbrauch'].sum(),3)*100} %")
     print(f"Netz_Deckungsgrad: {round(network.generators_t.p['Netzanschluss_2025'].sum()/network.loads_t.p['el_verbrauch'].sum(),3)*100} %")
 
     print(round(network.generators_t.p["PV_Aufdach_2025"].sum()))
     print(round(network.generators_t.p["Netzanschluss_2025"].sum()))
     print(round(network.loads_t.p["el_verbrauch"].sum()))
+
+    network.generators_t.p["PV_Aufdach_2025"].plot()
+    plt.show()
+    network.generators_t.p["Netzanschluss_2025"].plot()
+    plt.show()
+    network.loads_t.p.plot()
+    plt.show()
+    network.storage_units_t.state_of_charge.plot()
+    plt.show()
+
 if __name__ == "__main__":
     main()
 
