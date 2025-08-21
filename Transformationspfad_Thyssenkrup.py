@@ -74,6 +74,10 @@ def erstelle_network(years, snapshots, df_netzlast,df_netzlast_alle_jahre, df_pv
     network.investment_periods = years
 
     #----Komponenten----
+    network.add("Carrier",
+                name = "Gas",
+                co2_emissions = co2_emissionen_gas
+                )
 
     network.add("Carrier",
                 name = "PV",

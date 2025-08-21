@@ -127,17 +127,13 @@ for year in years:
         (gens['build_year'] <= year) &
         (year < gens['build_year'] + gens['lifetime'])
     ]
-    #Effizienzen =
 
     Gesamtkapaziteat = 0
     Gesamtenergie = 0
     for gens in active_gens.index:
         Gesamtkapaziteat += m.variables["Generator-p_nom"].loc[gens]
-        #Gesamtenergie += m.variables["Generator-p"].loc[(year-1):(year),gens] #kp ob das mit den Jahren so geht
-
-    constraint_name = "Erzeugungslimit_{}".format(year)
-
-    m.add_constraints(Gesamtkapaziteat >= 2000, name = constraint_name)
+        constraint_name = f"Erzeugungslimit_{year}_{gens}"
+        m.add_constraints(Gesamtkapaziteat <= 2000, name = constraint_name)
 
 
 # Optimierung durchführen
@@ -176,13 +172,13 @@ standard_co2_emissions = round((network.generators_t.p.sum() / network.generator
 print(network.carriers)
 print(network.generators[['carrier', 'p_nom_opt']])
 print(network.loads[['p_set']])
-
+'''
 for year in years:
-    energy = network.generators_t.p.xs(year, level=0)['EE-Generator_{}'.format(year)].sum()
-    print("Energieerzeugung_EE: {}".format(year), energy)
-    energy = network.generators_t.p.xs(year, level=0)['Gas-Generator_{}'.format(year)].sum()
-    print("Energieerzeugung_Gas: {}".format(year), energy)
-
+    energy_EE = network.generators_t.p.xs(year, level=0)['EE-Generator_{}'.format(year)].sum()
+    print("Energieerzeugung_EE: {}".format(year), energy_EE)
+    energy_Gas = network.generators_t.p.xs(year, level=0)['Gas-Generator_{}'.format(year)].sum()
+    print("Energieerzeugung_Gas: {}".format(year), energy_Gas)
+'''
 
 
 print(network.global_constraints)
