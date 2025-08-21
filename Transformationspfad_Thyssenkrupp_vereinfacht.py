@@ -14,6 +14,14 @@ co2_strommix = {  # Angaben in Gramm / kWh
     2030: 261,  # Studie
     2050: 0  # Annahme für das Modell
 }
+co2_limits = {
+    2025: np.inf,
+    2026: 16350e5,
+    2027: 0
+    #2028: 26100e7,
+    #2029: 26100e6,
+    #2030: 26100e5
+}
 co2_strommix = pd.Series(co2_strommix)
 co2_strommix = co2_strommix.reindex(range(2022, 2051))
 co2_strommix = co2_strommix.interpolate(method="linear")  # Interpolation für fehlende Jahre
@@ -30,6 +38,7 @@ baukosten_DRI = 518_460_000 # €
 betriebskosten_Hochofen = 1 # €
 baukosten_Hochofen = 133_071_400 # €
 kohleverbauch_pro_kg_Stahl = 60 #kg/kg_Stahl
+co2_strommix_2025 = co2_strommix[2025]
 
 
 #------------------------Daten einlesen-------------------------------
@@ -71,7 +80,7 @@ def erstelle_network(df_pv, df_wind,snapshots):
     network.add("Carrier", name="EE", co2_emissions=0)
     network.add("Carrier", name="Kohle", co2_emissions=co2_kohle)
     network.add("Carrier", name="H2")
-    network.add("Carrier", name="Stromnetz", co2_emissions=co2_strommix)
+    network.add("Carrier", name="Stromnetz", co2_emissions=co2_strommix_2025)
 
     # Busse
     network.add("Bus", name="elektrisches Netz", carrier="Stromnetz")
@@ -212,7 +221,7 @@ def erstelle_network(df_pv, df_wind,snapshots):
     network.add(
         "Generator",
         name="Kohle",
-        bus="kohle_bus",
+        bus="kohle",
         p_nom_extendable=True,
         marginal_cost=90,
         carrier="Kohle"
@@ -221,8 +230,8 @@ def erstelle_network(df_pv, df_wind,snapshots):
     network.add(
         "Link",
         name="Hochofen",
-        bus0="kohle_bus",
-        bus1="stahl_bus",
+        bus0="kohle",
+        bus1="stahl",
         efficiency=kohleverbauch_pro_kg_Stahl, #1 / 1.6,  # 1t Stahl benötigt 1,6t Kohle; 750kg energetisch und 850kg stofflich
         p_nom_extendable=True,
         marginal_cost=betriebskosten_Hochofen,
@@ -233,7 +242,7 @@ def erstelle_network(df_pv, df_wind,snapshots):
         "Link",
         name="DRI",
         bus0="Wasserstoff",
-        bus1="stahl_bus",
+        bus1="stahl",
         bus2="elektrisches Netz",
         efficiency=wasserstoffverbrauch_pro_kg_stahl,
         efficiency2=stromverbrauch_pro_kg_stahl,
@@ -267,12 +276,12 @@ def erstelle_network(df_pv, df_wind,snapshots):
 
     return network
 
-
+'''
 def co2_reduktion(network, co2_limits):
     df_p_nom_opt = pd.DataFrame(index=network.generators.index)
     df_emissionen = pd.DataFrame(index=["CO2-Limit", "CO2-Emissionen"])
 
-    for year in co2_limits():
+    for year in co2_limits:
         co2_limit = co2_limits[year]
 
         network.global_constraints.loc['co2-limit', 'constant'] = co2_limit
@@ -296,21 +305,31 @@ def co2_reduktion(network, co2_limits):
 
     print(df_p_nom_opt)
     print("\n", df_emissionen)
-
+'''
 
 def main():
     snapshots = pd.RangeIndex(8760)
     df_stahl, df_pv, df_wind = lade_daten(snapshots)
     network = erstelle_network(df_pv, df_wind, snapshots)
+    #co2_reduktion(network, co2_limits)
 
     # Optimierung durchführen
     network.optimize(
         solver_name='gurobi',
-        multi_investment_periods=True,
         threads=1)
-    '''
-    df_results = []
 
+    df_carrier = network.carriers
+    df_generators = network.generators.carrier
+
+    standard_co2_emissions = round((network.generators_t.p.sum() / network.generators.efficiency *
+                                    pd.merge(df_carrier, df_generators, left_index=True, right_on='carrier')[
+                                        'co2_emissions'])).sum()
+
+    for co2_limit in np.flip(np.arange(0, 1, 0.1)):
+        network.global_constraints.loc['co2-limit', 'constant'] = co2_limit * standard_co2_emissions
+        network.optimize(solver_name='gurobi', method=2, threads=1)
+
+    df_results = pd.DataFrame()
     df_results[str(round(co2_limit * 100, 0)) + '%'] = [network.statistics()["Capital Expenditure"].sum(),
                                                         network.statistics()["Operational Expenditure"].sum()] + list(
         network.generators.p_nom_opt) + list(network.links.p_nom_opt) + list(network.stores.e_nom_opt)
@@ -346,7 +365,7 @@ def main():
 
     fig.suptitle('Analyse des Transformationspfads eines Stahlherstellers')
     fig.tight_layout()
-
+    
     # Generatorleistungen übereinander
     ax = network.generators_t.p.plot(alpha=0.5)
 
@@ -358,7 +377,7 @@ def main():
     ax.legend(loc='upper left')
     plt.tight_layout()
     plt.show()
-    '''
+
 
 if __name__ == "__main__":
     main()
