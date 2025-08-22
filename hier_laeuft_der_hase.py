@@ -313,36 +313,99 @@ snapshots = pd.RangeIndex(8760)
 df_stahl, df_pv, df_wind = lade_daten(snapshots)
 network = erstelle_network(df_pv, df_wind, snapshots)
 #co2_reduktion(network, co2_limits)
-
+"""
 # Optimierung durchführen
 network.optimize(
     solver_name='gurobi',
     threads=1)
 
+"""
+"""
 df_carrier = network.carriers
 df_generators = network.generators.carrier
 
+gen_p = network.generators_t.p
+carrier_co2 = network.carriers["co2_emissions"]
+gen_carrier = network.generators["carrier"]
+gen_emissions = gen_carrier.map(carrier_co2)
+emissions_per_timestep = gen_p.multiply(gen_emissions, axis=1)
+emissions_ges = emissions_per_timestep.sum(axis=1).sum()
+#df_emissionen.loc["CO2-Limit", year] = f"{co2_limit/1e9:.2f} *1e9 g"
+#df_emissionen.loc["CO2-Emissionen", year] = f"{emissions_ges/1e9:.2f} * 1e9 g"
+"""
+
+"""
 standard_co2_emissions = round((network.generators_t.p.sum() / network.generators.efficiency *
                                 pd.merge(df_carrier, df_generators, left_index=True, right_on='carrier')[
                                     'co2_emissions'])).sum()
+"""
 
-for co2_limit in np.flip(np.arange(0, 1, 0.1)):
-    network.global_constraints.loc['co2-limit', 'constant'] = co2_limit * standard_co2_emissions
-    network.optimize(solver_name='gurobi', method=2, threads=1)
+#%% Schleife mit Simulationen und Einlesen der Ergebnisse
 
-df_results = pd.DataFrame()
-df_results[str(round(co2_limit * 100, 0)) + '%'] = ([network.statistics()["Capital Expenditure"].sum(),
-                                                    network.statistics()["Operational Expenditure"].sum()] 
-                                                    + list(network.generators.p_nom_opt) + list(network.links.p_nom_opt) 
-                                                    + list(network.stores.e_nom_opt))
+# Initialisierung der DataFrames
+df_emissionen = pd.DataFrame()
+df_generators = pd.DataFrame()
+df_links = pd.DataFrame()
+df_stores = pd.DataFrame()
+df_storage_units = pd.DataFrame()
+hochofen_p1 = pd.DataFrame()
+DRI_p1 = pd.DataFrame()
+stahllager_e = pd.DataFrame()
 
-#%% Auswertung
-#df_results = list(network.generators.p_nom_opt) + list(network.links.p_nom_opt) + list(network.stores.e_nom_opt)
+for co2_limit in np.flip(np.arange(0, 1.1, 0.1)):  # Inkl. 0 %
+    col_name = f"{int(round(co2_limit * 100))}%"
 
-#df_results = pd.DataFrame(index=)
+    # CO₂-Constraint setzen
+    network.global_constraints.loc['co2-limit', 'constant'] = co2_limit * 26097183999886
 
-fig, axs = plt.subplots(nrows=4, ncols=3, figsize=(15, 10))
-df_results.T.plot(subplots=True, ax=axs)
+    # Optimieren
+    network.optimize(solver_name='gurobi', method=2, threads=4)
+
+    # CO₂-Emissionen berechnen
+    gen_p = network.generators_t.p
+    carrier_co2 = network.carriers["co2_emissions"]
+    gen_carrier = network.generators["carrier"]
+    gen_emissions = gen_carrier.map(carrier_co2)
+    emissions_per_timestep = gen_p.multiply(gen_emissions, axis=1)
+    emissions_ges = emissions_per_timestep.sum(axis=1).sum()
+
+    # DataFrames befüllen
+    df_emissionen[col_name] = pd.Series({
+        "CO2-Limit": co2_limit * 26097183999886,
+        "CO2-Emissionen": emissions_ges
+    })
+    eff_links = network.links.efficiency.fillna(1.0) # Effizienzen der Links abrufen
+    df_links[col_name] = network.links.p_nom_opt * eff_links # Leistung Mal Effizienz für Output
+    df_generators[col_name] = network.generators.p_nom_opt
+    df_stores[col_name] = network.stores.e_nom_opt
+    df_storage_units[col_name] = network.storage_units.p_nom_opt
+    
+    # Zeitreihen des Hochofens und der DRI speichern
+    hochofen_p1[col_name] = -network.links_t.p1["Hochofen"] * eff_links["Hochofen"]
+    DRI_p1[col_name] = -network.links_t.p1["DRI"] * eff_links["DRI"]
+    stahllager_e[col_name] = network.stores_t.e["Stahllager"]
+
+
+# Store- und StorageUnit-Ergebnisse kombinieren
+df_storage_combined = pd.concat([df_stores, df_storage_units])
+
+#%% Diagramm Emissionen
+fig, axs = plt.subplots(nrows=1, ncols=2, figsize=(15, 10))
+df_emissionen.T.plot(subplots=True, ax=axs)
+
+axs[0].set_ylabel('g')
+axs[1].set_ylabel('g')
+
+axs[0].set_title('CO2-Limit')
+axs[1].set_title('Tatsächliche CO2-Emissionen')
+
+fig.suptitle('CO2-Emissionen')
+fig.tight_layout()
+plt.show()
+
+#%% Diagramm Generatoren
+fig, axs = plt.subplots(nrows=2, ncols=3, figsize=(15, 10))
+df_generators.T.plot(subplots=True, ax=axs)
 
 axs[0, 0].set_ylabel('kW')
 axs[0, 1].set_ylabel('kW')
@@ -350,41 +413,137 @@ axs[0, 2].set_ylabel('kW')
 axs[1, 0].set_ylabel('kW')
 axs[1, 1].set_ylabel('kW')
 axs[1, 2].set_ylabel('t')
-axs[2, 0].set_ylabel('kW')
-axs[2, 1].set_ylabel('€')
-axs[2, 2].set_ylabel('kW')
-axs[3, 0].set_ylabel('kW')
-axs[3, 1].set_ylabel('kWh')
-axs[3, 2].set_ylabel('kWh')
 
-axs[0, 0].set_title('PV_Sued')
-axs[0, 1].set_title('PV_Ost_West')
-axs[0, 2].set_title('Wind_Onshore')
-axs[1, 0].set_title('Wind_Offshore')
-axs[1, 1].set_title('Netzbezug')
-axs[1, 2].set_title('CO2 Emissionen')
-axs[2, 0].set_title('Hochofen')
-axs[2, 1].set_title('Investitionskosten')
-axs[2, 2].set_title('Wasserstoffverbrauch')
-axs[3, 0].set_title('Kohleverbauch')
-axs[3, 1].set_title('el. Speicherkapazität')
-axs[3, 2].set_title('H2 Speicherkapazität')
+axs[0, 0].set_title('Netzbezug')
+axs[0, 1].set_title('PV_Sued')
+axs[0, 2].set_title('PV_Ost_West')
+axs[1, 0].set_title('Wind_Onshore')
+axs[1, 1].set_title('Wind_Offshore')
+axs[1, 2].set_title('Kohle')
 
-fig.suptitle('Analyse des Transformationspfads eines Stahlherstellers')
+fig.suptitle('Generatoren')
 fig.tight_layout()
+plt.show()
 
-# Generatorleistungen übereinander
-ax = network.generators_t.p.plot(alpha=0.5)
+#%% Diagramm Links
+fig, axs = plt.subplots(nrows=1, ncols=3, figsize=(15, 10))
+df_links.T.plot(subplots=True, ax=axs)
 
-# Nur die Jahre (Periods) als x-Tick-Labels anzeigen
-ax.set_xticks(range(0, len(network.generators_t.p), 2920))  # Setze Positionen
-ax.set_xticklabels(years)
-ax.set_xlabel('year')
-ax.set_ylabel('P [MW]')
-ax.legend(loc='upper left')
+axs[0].set_ylabel('kg H2')
+axs[1].set_ylabel('t Stahl')
+axs[2].set_ylabel('t Stahl')
+
+axs[0].set_title('AEL')
+axs[1].set_title('Hochofen')
+axs[2].set_title('DRI')
+
+fig.suptitle('Output der Links')
+fig.tight_layout()
+plt.show()
+
+#%% Diagramm Speicher
+fig, axs = plt.subplots(nrows=1, ncols=3, figsize=(15, 10))
+df_storage_combined.T.plot(subplots=True, ax=axs)
+
+axs[0].set_ylabel('kg H2')
+axs[1].set_ylabel('t Stahl')
+axs[2].set_ylabel('kW')
+
+axs[0].set_title('H2_Speicher')
+axs[1].set_title('Stahllager')
+axs[2].set_title('Batterie Entladeleistung (Kapa. wäre geteilt durch 4')
+
+fig.suptitle('Speicherauslegung')
+fig.tight_layout()
+plt.show()
+
+#%% Stahlproduktion nach Links / zeitlicher Verlauf alle Jahre
+
+# alle Jahre in einem
+# Liste der Szenarien/Spalten
+szenarien = hochofen_p1.columns
+anzahl = len(szenarien)
+# Dynamische Festlegung von Layout (z. B. 4 Spalten)
+spalten = 4
+zeilen = -(-anzahl // spalten)  # entspricht math.ceil(anzahl / spalten)
+# Subplots erstellen
+fig, axs = plt.subplots(nrows=zeilen, ncols=spalten, figsize=(spalten * 4, zeilen * 3), sharex=True, sharey=True)
+axs = axs.flatten()  # 2D zu 1D für einfacheres Indexing
+# Plot für jede Spalte/Szenario
+for i, sz in enumerate(szenarien):
+    axs[i].plot(hochofen_p1.index, hochofen_p1[sz], label='Hochofen')
+    axs[i].plot(DRI_p1.index, DRI_p1[sz], label='DRI')
+    axs[i].set_title(sz)
+    axs[i].set_xlabel("Stunde")
+    axs[i].set_ylabel("t Stahl")
+    axs[i].legend()
+# Leere Achsen deaktivieren, falls nicht alle Subplots gebraucht werden
+for j in range(i + 1, len(axs)):
+    axs[j].axis("off")
+fig.suptitle("Vergleich Hochofen / DRI zeitlich", fontsize=16)
+fig.tight_layout(rect=[0, 0, 1, 0.96])  # Platz für suptitle
+plt.show()
+
+
+# einzelne Jahre
+plt.figure(figsize=(14, 8))
+hochofen_p1["0%"].plot(label="Hochofen")
+DRI_p1["0%"].plot(label="DRI")
+stahllager_e["0%"].plot(label="Füllstand Stahllager")
+plt.ylabel("Erzeugter Stahl [t]")
+plt.xlabel("Zeit")
+#plt.ylim(1084.474886-1, 1084.474886+1)
+plt.title("Zeitlicher Verlauf Output Hochofen & DRI")
+plt.legend(title="Link", loc="upper center", bbox_to_anchor=(0.5, -0.2), ncol=4, frameon=False)
+plt.grid(True, linestyle="--", alpha=0.5)
 plt.tight_layout()
 plt.show()
+
+#%% Stahlproduktion
+"""
+# alle Links einlesen, die stahl_bus beliefern
+links_zu_stahl = []
+
+for i in range(10):  # bus0 bis bus9 durchlaufen
+    bus_col = f"bus{i}" # Namen der zu durchsuchenden Spalte 
+    if bus_col in network.links.columns: # Spalten durchlaufen
+        matching = network.links[network.links[bus_col] == "Stahl"]
+        for link in matching.index:
+            links_zu_stahl.append((link, i))  # Linkname und Bus-Index
+
+
+# DataFrame mit zeitlichen Flüssen aller Links zu stahl_bus
+stahl_prod = pd.DataFrame()
+
+for link, i in links_zu_stahl: # alle Einträge in den Links durchlaufen
+    col_name = f"{link}_p{i}" # Spaltenname für neuen df
+    link_prod = -network.links_t[f"p{i}"][link] # Erzeugung auslesen
+    stahl_prod[col_name] = link_prod # Erzeugung eintragen
+
+# Summe aller bilden aber ohne Spalte "Summe" + Runden
+stahl_prod["Summe"] = stahl_prod.drop(columns=["Summe"], errors="ignore").sum(axis=1).round(6)
+
+
+#.loc[2029] für ein jahr
+plt.figure(figsize=(14, 8))
+#stahl_prod["Summe"].plot(label="Stahlproduktion")
+#network.stores_t.p["Stahllager"].clip(lower=0).plot(label="Stahllager-Entnahme")
+(stahl_prod["Summe"]+network.stores_t.p["Stahllager"]).plot(label="Stahllager-Entnahme")
+#network.links_t.p0.filter(like="DRI").sum(axis=1).plot(label="Wasserstoff-Verbrauch")
+#network.links_t.p2.filter(like="DRI").sum(axis=1).plot(label="Stromverbrauch")
+plt.ylabel("Erzeugter Stahl [t]")
+plt.xlabel("Zeit")
+#plt.ylim(1084.474886-1, 1084.474886+1)
+plt.title("Zeitverlauf der gesamten Stahlproduktion")
+plt.legend(title="Link", loc="upper center", bbox_to_anchor=(0.5, -0.2), ncol=4, frameon=False)
+plt.grid(True, linestyle="--", alpha=0.5)
+plt.tight_layout()
+plt.show()
+"""
+
+
 
 
 #if __name__ == "__main__":
  #   main()
+ 
