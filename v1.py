@@ -16,6 +16,10 @@ co2_strommix = {  # Angaben in Gramm / kWh
     2030: 261,  # Studie
     2050: 0  # Annahme für das Modell
 }
+co2_strommix = pd.Series(co2_strommix)
+co2_strommix = co2_strommix.reindex(range(2022, 2051))
+co2_strommix = co2_strommix.interpolate(method="linear")  # Interpolation für fehlende Jahre
+
 co2_limits = {
     2025: np.inf,
     2026: 16350e5,
@@ -24,26 +28,44 @@ co2_limits = {
     #2029: 26100e6,
     #2030: 26100e5
 }
-co2_strommix = pd.Series(co2_strommix)
-co2_strommix = co2_strommix.reindex(range(2022, 2051))
-co2_strommix = co2_strommix.interpolate(method="linear")  # Interpolation für fehlende Jahre
-co2_kohle = 769230 + 947690  # Gramm / Tonne Kohle; stofflich + energetisch
+co2_limits = pd.Series(co2_limits)
+co2_limits = co2_limits.reindex(range(2025, 2051))
+co2_limits = co2_limits.interpolate(method="linear")  # Interpolation für fehlende Jahre
 
-stahlproduktion = 9_500_000/8760# kg
 strompreis = 0.13 # €/kwh
+''' 
+# Strompreisentwicklung
+strompreise = { # Angaben in €/kWh
+    2025 : 0.13,    # bekannt
+    2026 : 0.128,   # Prognosen
+    2031 : 0.076,
+    2050 : 0.059
+    }
+strompreise = pd.Series(strompreise)
+strompreise = strompreise.reindex(range(2025,2051))
+strompreise = strompreise.interpolate(method="linear") # Interpolation für fehlende Jahre
+'''
+stahlproduktion = 9_500_000/8760 #kg in Format wie oben
+
+
+
+co2_kohle = 769230 + 947690  # Gramm / Tonne Kohle; stofflich + energetisch
 netzbezug_capitalcost = 147.54 # €/kWa
-wasserstoffpreise = 151 # €/kg
-wasserstoffverbrauch_pro_kg_stahl_stofflich = 60  # kg H2 pro t Stahl
-wasserstoffverbrauch_pro_kg_stahl_energetisch = 90  # kg H2 pro t Stahl
-stromverbrauch_pro_kg_stahl = 3.65 # kWh/kg
-#betriebskosten_DRI = 586 + 488 # DRI + Lichtbogenofem [€ / t Stahl]
-baukosten_DRI = 518.46e6 + 172.5855e6 + 133.0714e6 # Invest. DRI + Rückbau Hochofen + Invest. Lichtbogenofen [Mio. €]
-betriebskosten_Hochofen = 558.25 # €
-baukosten_Hochofen = 133_071_400 # €
-kohleverbauch_pro_kg_Stahl = 1.6 #kg/kg_Stahl
+
+DRI_wasserstoffverbrauch_pro_kg_stahl_stofflich = 60  # kg H2 pro t Stahl
+DRI_wasserstoffverbrauch_pro_kg_stahl_energetisch = 90  # kg H2 pro t Stahl
+DRI_stromverbrauch_pro_kg_stahl = 3.65 # kWh/kg
+DRI_baukosten = 518.46e6 + 172.5855e6 + 133.0714e6 # Invest. DRI + Rückbau Hochofen + Invest. Lichtbogenofen [Mio. €]
+#betriebskosten_DRI = 586 + 488 #DRI + Lichtbogenofen [€ / t Stahl] hiermit sind KOsten für Wartung, Instandhaltung usw. gemeint
+
+
+HO_betriebskosten = 558.25 #€ wie setzten die sich zusammen?
+HO_kohleverbauch_pro_kg_Stahl = 1.6 #kg/kg_Stahl
+#HO_baukosten = 133_071_400 # € kann raus
+
+
 co2_strommix_2025 = co2_strommix[2025]
-
-
+#wasserstoffpreise = 151 #€/kg kann raus, oder?
 #------------------------Daten einlesen-------------------------------
 def lade_daten(snapshots):
     # Dateipfad einlesen
@@ -55,17 +77,14 @@ def lade_daten(snapshots):
 
     # PV-Erzeugung
     df_pv = pd.DataFrame(index = snapshots)
-
     for name in ["sued", "ost", "west"]:  # Schleife, um alle 3 Profile einzulesen
         profil = pd.read_csv(
             os.path.join(ordner_input, f"PV/{name}.csv"), skiprows=3, usecols=["electricity"]).shift(1, fill_value=0).to_numpy()  # shift wegen Zeitverschiebung, 0 einsetzen
         df_pv[name] = profil
-
     df_pv["ost/west"] = df_pv[["ost", "west"]].mean(axis=1)  # Mittelwert für Ost/West bilden
 
     # Wind-Erzeugung
     df_wind = pd.DataFrame(index = snapshots)
-
     for name in ["Onshore", "Offshore"]:  # Schleife, um beide Profile einzulesen
         profil = pd.read_csv(
             os.path.join(ordner_input, f"Wind/{name}.csv"), skiprows=3, usecols=["electricity"])["electricity"]
@@ -100,7 +119,7 @@ def erstelle_network(df_pv, df_wind,snapshots):
         name="Netzbezug",
         bus="elektrisches Netz",
         p_nom_extendable=True,
-        capital_cost=147.54,
+        capital_cost=netzbezug_capitalcost,
         marginal_cost=strompreis,
         carrier="Stromnetz"
     )
@@ -112,7 +131,7 @@ def erstelle_network(df_pv, df_wind,snapshots):
         bus="elektrisches Netz",
         p_nom_extendable=True,
         p_max_pu=df_pv["sued"],
-        capital_cost=1100,
+        capital_cost=1100, #in Variable rein
         marginal_cost=0.008,
         carrier="EE"
     )
@@ -240,13 +259,14 @@ def erstelle_network(df_pv, df_wind,snapshots):
         name="Hochofen",
         bus0="Kohle",
         bus1="Stahl",
-        efficiency = 1 / kohleverbauch_pro_kg_Stahl, #1 / 1.6,  # 1t Stahl benötigt 1,6t Kohle; 750kg energetisch und 850kg stofflich
+        efficiency = 1 / HO_kohleverbauch_pro_kg_Stahl, #1 / 1.6,  # 1t Stahl benötigt 1,6t Kohle; 750kg energetisch und 850kg stofflich
         p_nom_extendable=True,
-        p_nom_mod = (stahlproduktion * kohleverbauch_pro_kg_Stahl) / 5, # stündl. Stahlproduktion durch Effizienz durch Anz. Hochöfen (5)
-        p_nom_max = stahlproduktion * kohleverbauch_pro_kg_Stahl,
+        p_nom_mod = (stahlproduktion * HO_kohleverbauch_pro_kg_Stahl) / 5, # stündl. Stahlproduktion durch Effizienz durch Anz. Hochöfen (5)
+        p_nom_max = stahlproduktion * HO_kohleverbauch_pro_kg_Stahl,
         p_min_pu = 0.75,
-        marginal_cost = betriebskosten_Hochofen * kohleverbauch_pro_kg_Stahl,
+        marginal_cost = HO_betriebskosten * HO_kohleverbauch_pro_kg_Stahl,
     )
+<<<<<<< HEAD
     
     network.add(
         "Link",
@@ -262,6 +282,46 @@ def erstelle_network(df_pv, df_wind,snapshots):
         #marginal_cost = betriebskosten_DRI,
         #capital_cost = baukosten_DRI
     )
+=======
+    """
+    network.add(
+        "Link",
+        name="DRI",
+        bus0="Wasserstoff",
+        bus1="Stahl",
+        bus2 = "Wasserstoff",
+        bus3="elektrisches Netz",
+        efficiency0 = 1 / DRI_wasserstoffverbrauch_pro_kg_stahl_stofflich,
+        efficiency2 = - (1 / DRI_wasserstoffverbrauch_pro_kg_stahl_energetisch),
+        efficiency3 = - (DRI_stromverbrauch_pro_kg_stahl * 1000),
+        p_nom_extendable=True,
+        #marginal_cost = betriebskosten_DRI,
+        capital_cost = DRI_baukosten
+    )
+    """
+    network.add(
+        "Link",
+        name="DRI",
+        bus0="Wasserstoff",
+        bus1="Stahl",
+        bus2="elektrisches Netz",
+        efficiency0 = 1 / DRI_wasserstoffverbrauch_pro_kg_stahl_stofflich,
+        efficiency2 = - (DRI_stromverbrauch_pro_kg_stahl * 1000),
+        p_nom_extendable=True,
+        #marginal_cost = betriebskosten_DRI,
+        capital_cost = DRI_baukosten
+    )
+    
+    network.add(
+        "Link",
+        name = "H2_in_Brenner",
+        bus0 = "Wasserstoff",
+        bus1="Stahl",
+        #bus1 = "DRI energetisch",
+        efficiency = 1 / DRI_wasserstoffverbrauch_pro_kg_stahl_energetisch,
+        p_nom_extendable = True
+        )
+>>>>>>> ab39516b7e530871a35f00307e2b206757a712af
     
     network.add(
         "Generator",

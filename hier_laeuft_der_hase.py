@@ -5,7 +5,7 @@ import os
 import matplotlib.pyplot as plt
 from networkx.algorithms.efficiency_measures import efficiency
 
-#%% Variablen definieren
+#   ---------------Variablen einlesen----------------------
 # CO2-Emissionen
 co2_strommix = {  # Angaben in Gramm / kWh
     2022: 433,  # historisch
@@ -31,17 +31,18 @@ stahlproduktion = 9_500_000/8760# kg
 strompreis = 0.13 # €/kwh
 netzbezug_capitalcost = 147.54 # €/kWa
 wasserstoffpreise = 151 # €/kg
-wasserstoffverbrauch_pro_kg_stahl = 60  # pro kg Stahl
+wasserstoffverbrauch_pro_kg_stahl_stofflich = 60  # pro kg Stahl
+wasserstoffverbrauch_pro_kg_stahl_energetisch = 90  # pro kg Stahl
 stromverbrauch_pro_kg_stahl = 3.65 # kWh/kg
-betriebskosten_DRI = 1 # €
-baukosten_DRI = 518_460_000 # €
-betriebskosten_Hochofen = 1 # €
+#betriebskosten_DRI = 586 + 488 # DRI + Lichtbogenofem [€ / t Stahl]
+baukosten_DRI = 518.46e6 + 172.5855e6 + 133.0714e6 # Invest. DRI + Rückbau Hochofen + Invest. Lichtbogenofen [Mio. €]
+betriebskosten_Hochofen = 558.25 # €
 baukosten_Hochofen = 133_071_400 # €
-kohleverbauch_pro_kg_Stahl = 60 #kg/kg_Stahl
+kohleverbauch_pro_kg_Stahl = 1.6 #kg/kg_Stahl
 co2_strommix_2025 = co2_strommix[2025]
 
 
-#%% Daten einlesen
+#------------------------Daten einlesen-------------------------------
 def lade_daten(snapshots):
     # Dateipfad einlesen
     dateipfad_code = os.path.dirname(os.path.realpath(__file__))  # Übergeordneter Ordner, in dem Codedatei liegt
@@ -71,7 +72,8 @@ def lade_daten(snapshots):
 
     return df_stahl, df_pv, df_wind
 
-#%% Network
+#%% Netzwerkdefinition
+
 def erstelle_network(df_pv, df_wind,snapshots):
     network = pypsa.Network()
     network.set_snapshots(snapshots)
@@ -93,7 +95,7 @@ def erstelle_network(df_pv, df_wind,snapshots):
         name="Netzbezug",
         bus="elektrisches Netz",
         p_nom_extendable=True,
-        capital_cost=147.54,
+        capital_cost=147.54,#müssen wir uns mal noch überlegen
         marginal_cost=strompreis,
         carrier="Stromnetz"
     )
@@ -164,15 +166,16 @@ def erstelle_network(df_pv, df_wind,snapshots):
         name="AEL",
         bus0="elektrisches Netz",
         bus1="Wasserstoff",
-        efficiency=0.7,
+        efficiency=0.7/33.33, # 70% Effizienz energiebezogen
         p_nom_extendable=True,
         p_nom_min=2000,
         # p_nom_max = ,
         capital_cost=0.875,
         # Alle Kosten der Elektrolysen könnte man nochmal prüfen, da wir einige verschiedene haben
-        marginal_cost=0.875 * 0.04,
-    )
-
+        marginal_cost=0.875 * 0.04
+        )
+    
+    """
     network.add(
         "Link",
         name="HTE",
@@ -185,7 +188,7 @@ def erstelle_network(df_pv, df_wind,snapshots):
         capital_cost=1.3,  # nochmal prüfen
         marginal_cost=1.3 * 0.12,
     )  # Annahme, dass Wärme durch Hochofen / Lichtbogenofen bereitgestellt werden kann, daher immer verfügbar
-
+    """    
 
     network.add(
         "Store",
@@ -197,31 +200,31 @@ def erstelle_network(df_pv, df_wind,snapshots):
         marginal_cost=0.45,
         standing_loss=2.084e-5,  # 0,05%/Tag -> 0,0005/Tag/unit -> (1-x)^24 = 1 - 0,0005
     )
-
+    """
     network.add(
         "Link",
         name="H2_stofflich",
         bus0="Wasserstoff",
-        bus1="stahl_bus",
+        bus1="Stahl",
         efficiency=1 / (60 * 33.33),  # 1t Stahl benötigt 60kg H2 mit 33,33kWh/kg
         p_nom_extendable=True
     )
-
+    """
 
     # Stahl-Bus
     network.add(
         "Load",
         name="Stahlproduktion",
-        bus="stahl_bus",
+        bus="Stahl",
         #p_set=df_stahl.loc[2025, "Produzierte Stahlmenge [t/a]"] / 8760  # Tonnen Stahl pro Stunde
-        p_set=stahlproduktion/9760
+        p_set=stahlproduktion
     )
 
     # Kohle-Bus
     network.add(
         "Generator",
         name="Kohle",
-        bus="kohle",
+        bus="Kohle",
         p_nom_extendable=True,
         marginal_cost=90,
         carrier="Kohle"
@@ -230,40 +233,37 @@ def erstelle_network(df_pv, df_wind,snapshots):
     network.add(
         "Link",
         name="Hochofen",
-        bus0="kohle",
-        bus1="stahl",
-        efficiency=kohleverbauch_pro_kg_Stahl, #1 / 1.6,  # 1t Stahl benötigt 1,6t Kohle; 750kg energetisch und 850kg stofflich
+        bus0="Kohle",
+        bus1="Stahl",
+        efficiency = 1 / kohleverbauch_pro_kg_Stahl, #1 / 1.6,  # 1t Stahl benötigt 1,6t Kohle; 750kg energetisch und 850kg stofflich
         p_nom_extendable=True,
-        marginal_cost=betriebskosten_Hochofen,
-        capital_cost=baukosten_Hochofen
+        marginal_cost = betriebskosten_Hochofen * kohleverbauch_pro_kg_Stahl,
     )
 
     network.add(
         "Link",
         name="DRI",
         bus0="Wasserstoff",
-        bus1="stahl",
-        bus2="elektrisches Netz",
-        efficiency=wasserstoffverbrauch_pro_kg_stahl,
-        efficiency2=stromverbrauch_pro_kg_stahl,
+        bus1="Stahl",
+        bus2 ="Wasserstoff",
+        bus3="elektrisches Netz",
+        efficiency0 = 1 / wasserstoffverbrauch_pro_kg_stahl_stofflich,
+        efficiency2 = - (1 / wasserstoffverbrauch_pro_kg_stahl_energetisch),
+        efficiency3 = - (stromverbrauch_pro_kg_stahl * 1000),
         p_nom_extendable=True,
-        marginal_cost = betriebskosten_DRI,
+        #marginal_cost = betriebskosten_DRI,
         capital_cost = baukosten_DRI
-
     )
 
     network.add(
-        "StorageUnit",
+        "Store",
         name="Stahllager",
         bus="Stahl",
-        p_nom_extendable=True,
-        # p_nom_min = ,
-        # p_nom_max = ,
-        #marginal_cost=Betriebskosten_Stahllager,
-        #capital_cost=Baukosten_Stahllager,
-        # state_of_charge_initial = 0,
-        #max_hours=4,  # Stunden bei voller Leistung -> bestimmt Kapazität
+        #e_nom_extendable=True,
+        e_nom = 50000,
+        e_initial = 0,
     )
+    
 
     # Global Constraint
     network.add(
@@ -275,7 +275,8 @@ def erstelle_network(df_pv, df_wind,snapshots):
     )
 
     return network
-#%% Müll
+
+#%% Simultaion
 '''
 def co2_reduktion(network, co2_limits):
     df_p_nom_opt = pd.DataFrame(index=network.generators.index)
@@ -306,100 +307,84 @@ def co2_reduktion(network, co2_limits):
     print(df_p_nom_opt)
     print("\n", df_emissionen)
 '''
-#%% main
-def main():
-    snapshots = pd.RangeIndex(8760)
-    df_stahl, df_pv, df_wind = lade_daten(snapshots)
-    network = erstelle_network(df_pv, df_wind, snapshots)
-    #co2_reduktion(network, co2_limits)
 
-    # Optimierung durchführen
-    network.optimize(
-        solver_name='gurobi',
-        threads=1)
-#%% AUswertung
-    df_carrier = network.carriers
-    df_generators = network.generators.carrier
+#def main():
+snapshots = pd.RangeIndex(8760)
+df_stahl, df_pv, df_wind = lade_daten(snapshots)
+network = erstelle_network(df_pv, df_wind, snapshots)
+#co2_reduktion(network, co2_limits)
 
-    # CO₂-Basisemissionen berechnen
-    gen_co2 = (
-            network.generators_t.p
-            @ (network.generators["carrier"].map(network.carriers["co2_emissions"])
-               / network.generators["efficiency"])
-    )
-    standard_co2_emissions = gen_co2.sum()
+# Optimierung durchführen
+network.optimize(
+    solver_name='gurobi',
+    threads=1)
 
-    # Ergebnisse speichern
-    df_results = pd.DataFrame()
+df_carrier = network.carriers
+df_generators = network.generators.carrier
 
-    for co2_limits in np.flip(np.arange(0, 1, 0.5)):
-        network.global_constraints.loc['co2-limit', 'constant'] = co2_limits * standard_co2_emissions
-        network.optimize(solver_name='gurobi', threads=4)
+standard_co2_emissions = round((network.generators_t.p.sum() / network.generators.efficiency *
+                                pd.merge(df_carrier, df_generators, left_index=True, right_on='carrier')[
+                                    'co2_emissions'])).sum()
 
-        df_results[str(round(co2_limits * 100, 0)) + '%'] = (
-                list(network.generators.p_nom_opt)
-                + list(network.links.p_nom_opt)
-                + list(network.stores.e_nom_opt)
-        )
+for co2_limit in np.flip(np.arange(0, 1, 0.1)):
+    network.global_constraints.loc['co2-limit', 'constant'] = co2_limit * standard_co2_emissions
+    network.optimize(solver_name='gurobi', method=2, threads=1)
 
-    print(network.generators.p_nom_opt)
-    print(network.links.p_nom_opt)
-    print(network.stores.e_nom_opt)
-    print(df_results)
+df_results = pd.DataFrame()
+df_results[str(round(co2_limit * 100, 0)) + '%'] = ([network.statistics()["Capital Expenditure"].sum(),
+                                                    network.statistics()["Operational Expenditure"].sum()] 
+                                                    + list(network.generators.p_nom_opt) + list(network.links.p_nom_opt) 
+                                                    + list(network.stores.e_nom_opt))
 
-    # Plot
-    fig, axs = plt.subplots(nrows=4, ncols=3, figsize=(15, 10))
-    df_results.T.plot(subplots=True, ax=axs.flatten())
-    # Legenden anzeigen
-    for ax in axs.flatten():
-        ax.legend(title="CO₂-Limit")
+#%% Auswertung
+#df_results = list(network.generators.p_nom_opt) + list(network.links.p_nom_opt) + list(network.stores.e_nom_opt)
 
-    # Achsenbeschriftungen
-    axs[0, 0].set_ylabel('kW')
-    axs[0, 1].set_ylabel('kW')
-    axs[0, 2].set_ylabel('kW')
-    axs[1, 0].set_ylabel('kW')
-    axs[1, 1].set_ylabel('kW')
-    axs[1, 2].set_ylabel('t CO₂')
-    axs[2, 0].set_ylabel('kW')
-    axs[2, 1].set_ylabel('€')
-    axs[2, 2].set_ylabel('kW')
-    axs[3, 0].set_ylabel('kW')
-    axs[3, 1].set_ylabel('kWh')
-    axs[3, 2].set_ylabel('kWh')
+#df_results = pd.DataFrame(index=)
 
-    # Titel
-    axs[0, 0].set_title('PV_Sued')
-    axs[0, 1].set_title('PV_Ost_West')
-    axs[0, 2].set_title('Wind_Onshore')
-    axs[1, 0].set_title('Wind_Offshore')
-    axs[1, 1].set_title('Netzbezug')
-    axs[1, 2].set_title('CO2 Emissionen')
-    axs[2, 0].set_title('Hochofen')
-    axs[2, 1].set_title('Investitionskosten')
-    axs[2, 2].set_title('Wasserstoffverbrauch')
-    axs[3, 0].set_title('Kohleverbrauch')
-    axs[3, 1].set_title('el. Speicherkapazität')
-    axs[3, 2].set_title('H2 Speicherkapazität')
+fig, axs = plt.subplots(nrows=4, ncols=3, figsize=(15, 10))
+df_results.T.plot(subplots=True, ax=axs)
 
-    fig.suptitle('Analyse des Transformationspfads eines Stahlherstellers')
-    fig.tight_layout()
-    plt.show()
-    '''
-        # Generatorleistungen übereinander
-    ax = network.generators_t.p.plot(alpha=0.5)
+axs[0, 0].set_ylabel('kW')
+axs[0, 1].set_ylabel('kW')
+axs[0, 2].set_ylabel('kW')
+axs[1, 0].set_ylabel('kW')
+axs[1, 1].set_ylabel('kW')
+axs[1, 2].set_ylabel('t')
+axs[2, 0].set_ylabel('kW')
+axs[2, 1].set_ylabel('€')
+axs[2, 2].set_ylabel('kW')
+axs[3, 0].set_ylabel('kW')
+axs[3, 1].set_ylabel('kWh')
+axs[3, 2].set_ylabel('kWh')
 
-        # Nur die Jahre (Periods) als x-Tick-Labels anzeigen
-    ax.set_xticks(range(0, len(network.generators_t.p), 2920))  # Setze Positionen
-    ax.set_xticklabels(years)
-    ax.set_xlabel('year')
-    ax.set_ylabel('P [MW]')
-    ax.legend(loc='upper left')
-    plt.tight_layout()
-    plt.show()
-    '''
+axs[0, 0].set_title('PV_Sued')
+axs[0, 1].set_title('PV_Ost_West')
+axs[0, 2].set_title('Wind_Onshore')
+axs[1, 0].set_title('Wind_Offshore')
+axs[1, 1].set_title('Netzbezug')
+axs[1, 2].set_title('CO2 Emissionen')
+axs[2, 0].set_title('Hochofen')
+axs[2, 1].set_title('Investitionskosten')
+axs[2, 2].set_title('Wasserstoffverbrauch')
+axs[3, 0].set_title('Kohleverbauch')
+axs[3, 1].set_title('el. Speicherkapazität')
+axs[3, 2].set_title('H2 Speicherkapazität')
 
-if __name__ == "__main__":
-    main()
+fig.suptitle('Analyse des Transformationspfads eines Stahlherstellers')
+fig.tight_layout()
+
+# Generatorleistungen übereinander
+ax = network.generators_t.p.plot(alpha=0.5)
+
+# Nur die Jahre (Periods) als x-Tick-Labels anzeigen
+ax.set_xticks(range(0, len(network.generators_t.p), 2920))  # Setze Positionen
+ax.set_xticklabels(years)
+ax.set_xlabel('year')
+ax.set_ylabel('P [MW]')
+ax.legend(loc='upper left')
+plt.tight_layout()
+plt.show()
 
 
+#if __name__ == "__main__":
+ #   main()
