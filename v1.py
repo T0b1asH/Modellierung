@@ -93,8 +93,8 @@ def erstelle_network(df_pv, df_wind,snapshots):
     network.add("Bus", name="Erdgas", carrier="Erdgas")
     network.add("Bus", name="Stahl")
     network.add("Bus", name="Kohle", carrier="Kohle")
-    network.add("Bus", name="DRI energetisch")
-
+    network.add("Bus", name="DRI")
+    """
     network.add(
         "Generator",
         name="Netzbezug",
@@ -104,7 +104,7 @@ def erstelle_network(df_pv, df_wind,snapshots):
         marginal_cost=strompreis,
         carrier="Stromnetz"
     )
-
+    """
     # Erneuerbare
     network.add(
         "Generator",
@@ -247,44 +247,21 @@ def erstelle_network(df_pv, df_wind,snapshots):
         p_min_pu = 0.75,
         marginal_cost = betriebskosten_Hochofen * kohleverbauch_pro_kg_Stahl,
     )
-    """
-    network.add(
-        "Link",
-        name="DRI",
-        bus0="Wasserstoff",
-        bus1="Stahl",
-        bus2 = "Wasserstoff",
-        bus3="elektrisches Netz",
-        efficiency0 = 1 / wasserstoffverbrauch_pro_kg_stahl_stofflich,
-        efficiency2 = - (1 / wasserstoffverbrauch_pro_kg_stahl_energetisch),
-        efficiency3 = - (stromverbrauch_pro_kg_stahl * 1000),
-        p_nom_extendable=True,
-        #marginal_cost = betriebskosten_DRI,
-        capital_cost = baukosten_DRI
-    )
-    """
-    network.add(
-        "Link",
-        name="DRI",
-        bus0="Wasserstoff",
-        bus1="Stahl",
-        bus2="elektrisches Netz",
-        efficiency0 = 1 / wasserstoffverbrauch_pro_kg_stahl_stofflich,
-        efficiency2 = - (stromverbrauch_pro_kg_stahl * 1000),
-        p_nom_extendable=True,
-        #marginal_cost = betriebskosten_DRI,
-        capital_cost = baukosten_DRI
-    )
     
     network.add(
         "Link",
-        name = "H2_in_Brenner",
-        bus0 = "Wasserstoff",
-        bus1="Stahl",
-        #bus1 = "DRI energetisch",
-        efficiency = 1 / wasserstoffverbrauch_pro_kg_stahl_energetisch,
-        p_nom_extendable = True
-        )
+        name="H2_in_DRI",
+        bus0="Wasserstoff",
+        bus1="DRI",
+        bus2 = "Wasserstoff",
+        #bus3="elektrisches Netz",
+        efficiency0 = 1 / wasserstoffverbrauch_pro_kg_stahl_stofflich,
+        efficiency2 = - (1 / wasserstoffverbrauch_pro_kg_stahl_energetisch),
+        #efficiency3 = - (stromverbrauch_pro_kg_stahl * 1000),
+        p_nom_extendable=True,
+        #marginal_cost = betriebskosten_DRI,
+        #capital_cost = baukosten_DRI
+    )
     
     network.add(
         "Generator",
@@ -298,12 +275,27 @@ def erstelle_network(df_pv, df_wind,snapshots):
     
     network.add(
         "Link",
-        name="Erdgas_in_Brenner",
+        name="Erdgas_in_DRI",
         bus0="Erdgas",
+        bus1="DRI",
+        bus2="Erdgas",
+        efficiency0 = 1 / 2000, # Erdgas stofflich
+        efficiency2 = - (1 / 3000), # Erdgas energetisch
+        p_nom_extendable=True,
+        #marginal_cost = betriebskosten_DRI,
+        #capital_cost = baukosten_DRI
+    )
+    
+    network.add(
+        "Link",
+        name="DRI",
+        bus0="DRI",
         bus1="Stahl",
+        bus2="elektrisches Netz",
         #bus1="DRI energetisch",
-        efficiency = 1 / 3000, # Excel-Datei sagt energetisch in DRI 3.000kWh pro Tonne Stahl
-        p_nom_extendable = True
+        efficiency2 = - (1 / 650),
+        p_nom_extendable = True,
+        capital_cost = baukosten_DRI,
         )
 
     network.add(
@@ -346,7 +338,7 @@ def custom_constraint_rueckbau(network, snapshots):
     
     model.add_constraints(constraint_expression, name="Rückbau Hochofen")
 
-
+"""
 def custom_constraint_brenner(network, snapshots):
     model = network.model
     p = model.variables["Link-p"]
@@ -367,7 +359,7 @@ def custom_constraint_brenner(network, snapshots):
 def alle_custom_constraints(network, snapshots):
     custom_constraint_rueckbau(network, snapshots)
     custom_constraint_brenner(network, snapshots)
-
+"""
 #%% Main
 
 #def main():
@@ -420,7 +412,7 @@ for co2_limit in np.flip(np.arange(0, 1.1, 0.2)):  # Inkl. 0 %
     solver_name='gurobi',
     method=2,
     threads=4,
-    extra_functionality=alle_custom_constraints
+    extra_functionality=custom_constraint_rueckbau
     )
 
 
