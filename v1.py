@@ -266,7 +266,7 @@ def erstelle_network(df_pv, df_wind,snapshots):
         p_min_pu = 0.75,
         marginal_cost = HO_betriebskosten * HO_kohleverbauch_pro_kg_Stahl,
     )
-<<<<<<< HEAD
+
     
     network.add(
         "Link",
@@ -275,14 +275,14 @@ def erstelle_network(df_pv, df_wind,snapshots):
         bus1="DRI",
         bus2 = "Wasserstoff",
         #bus3="elektrisches Netz",
-        efficiency0 = 1 / wasserstoffverbrauch_pro_kg_stahl_stofflich,
-        efficiency2 = - (1 / wasserstoffverbrauch_pro_kg_stahl_energetisch),
+        efficiency0 = 1 / DRI_wasserstoffverbrauch_pro_kg_stahl_stofflich,
+        efficiency2 = - (1 / DRI_wasserstoffverbrauch_pro_kg_stahl_energetisch),
         #efficiency3 = - (stromverbrauch_pro_kg_stahl * 1000),
         p_nom_extendable=True,
         #marginal_cost = betriebskosten_DRI,
-        #capital_cost = baukosten_DRI
+        #capital_cost = DRI_baukosten
     )
-=======
+
     """
     network.add(
         "Link",
@@ -321,7 +321,7 @@ def erstelle_network(df_pv, df_wind,snapshots):
         efficiency = 1 / DRI_wasserstoffverbrauch_pro_kg_stahl_energetisch,
         p_nom_extendable = True
         )
->>>>>>> ab39516b7e530871a35f00307e2b206757a712af
+
     
     network.add(
         "Generator",
@@ -343,7 +343,7 @@ def erstelle_network(df_pv, df_wind,snapshots):
         efficiency2 = - (1 / 3000), # Erdgas energetisch
         p_nom_extendable=True,
         #marginal_cost = betriebskosten_DRI,
-        #capital_cost = baukosten_DRI
+        #capital_cost = DRI_baukosten
     )
     
     network.add(
@@ -355,7 +355,7 @@ def erstelle_network(df_pv, df_wind,snapshots):
         #bus1="DRI energetisch",
         efficiency2 = - (1 / 650),
         p_nom_extendable = True,
-        capital_cost = baukosten_DRI,
+        capital_cost = DRI_baukosten
         )
 
     network.add(
