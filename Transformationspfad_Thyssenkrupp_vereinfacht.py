@@ -5,7 +5,7 @@ import os
 import matplotlib.pyplot as plt
 from networkx.algorithms.efficiency_measures import efficiency
 
-#   ---------------Variablen einlesen----------------------
+#%% Variablen definieren
 # CO2-Emissionen
 co2_strommix = {  # Angaben in Gramm / kWh
     2022: 433,  # historisch
@@ -41,7 +41,7 @@ kohleverbauch_pro_kg_Stahl = 60 #kg/kg_Stahl
 co2_strommix_2025 = co2_strommix[2025]
 
 
-#------------------------Daten einlesen-------------------------------
+#%% Daten einlesen
 def lade_daten(snapshots):
     # Dateipfad einlesen
     dateipfad_code = os.path.dirname(os.path.realpath(__file__))  # Übergeordneter Ordner, in dem Codedatei liegt
@@ -71,7 +71,7 @@ def lade_daten(snapshots):
 
     return df_stahl, df_pv, df_wind
 
-
+#%% Network
 def erstelle_network(df_pv, df_wind,snapshots):
     network = pypsa.Network()
     network.set_snapshots(snapshots)
@@ -275,7 +275,7 @@ def erstelle_network(df_pv, df_wind,snapshots):
     )
 
     return network
-
+#%% Müll
 '''
 def co2_reduktion(network, co2_limits):
     df_p_nom_opt = pd.DataFrame(index=network.generators.index)
@@ -306,7 +306,7 @@ def co2_reduktion(network, co2_limits):
     print(df_p_nom_opt)
     print("\n", df_emissionen)
 '''
-
+#%% main
 def main():
     snapshots = pd.RangeIndex(8760)
     df_stahl, df_pv, df_wind = lade_daten(snapshots)
@@ -317,32 +317,50 @@ def main():
     network.optimize(
         solver_name='gurobi',
         threads=1)
-
+#%% AUswertung
     df_carrier = network.carriers
     df_generators = network.generators.carrier
 
-    standard_co2_emissions = round((network.generators_t.p.sum() / network.generators.efficiency *
-                                    pd.merge(df_carrier, df_generators, left_index=True, right_on='carrier')[
-                                        'co2_emissions'])).sum()
+    # CO₂-Basisemissionen berechnen
+    gen_co2 = (
+            network.generators_t.p
+            @ (network.generators["carrier"].map(network.carriers["co2_emissions"])
+               / network.generators["efficiency"])
+    )
+    standard_co2_emissions = gen_co2.sum()
 
-    for co2_limit in np.flip(np.arange(0, 1, 0.1)):
-        network.global_constraints.loc['co2-limit', 'constant'] = co2_limit * standard_co2_emissions
-        network.optimize(solver_name='gurobi', method=2, threads=1)
-
+    # Ergebnisse speichern
     df_results = pd.DataFrame()
-    df_results[str(round(co2_limit * 100, 0)) + '%'] = [network.statistics()["Capital Expenditure"].sum(),
-                                                        network.statistics()["Operational Expenditure"].sum()] + list(
-        network.generators.p_nom_opt) + list(network.links.p_nom_opt) + list(network.stores.e_nom_opt)
 
+    for co2_limits in np.flip(np.arange(0, 1, 0.5)):
+        network.global_constraints.loc['co2-limit', 'constant'] = co2_limits * standard_co2_emissions
+        network.optimize(solver_name='gurobi', threads=4)
+
+        df_results[str(round(co2_limits * 100, 0)) + '%'] = (
+                list(network.generators.p_nom_opt)
+                + list(network.links.p_nom_opt)
+                + list(network.stores.e_nom_opt)
+        )
+
+    print(network.generators.p_nom_opt)
+    print(network.links.p_nom_opt)
+    print(network.stores.e_nom_opt)
+    print(df_results)
+
+    # Plot
     fig, axs = plt.subplots(nrows=4, ncols=3, figsize=(15, 10))
-    df_results.T.plot(subplots=True, ax=axs)
+    df_results.T.plot(subplots=True, ax=axs.flatten())
+    # Legenden anzeigen
+    for ax in axs.flatten():
+        ax.legend(title="CO₂-Limit")
 
+    # Achsenbeschriftungen
     axs[0, 0].set_ylabel('kW')
     axs[0, 1].set_ylabel('kW')
     axs[0, 2].set_ylabel('kW')
     axs[1, 0].set_ylabel('kW')
     axs[1, 1].set_ylabel('kW')
-    axs[1, 2].set_ylabel('t')
+    axs[1, 2].set_ylabel('t CO₂')
     axs[2, 0].set_ylabel('kW')
     axs[2, 1].set_ylabel('€')
     axs[2, 2].set_ylabel('kW')
@@ -350,6 +368,7 @@ def main():
     axs[3, 1].set_ylabel('kWh')
     axs[3, 2].set_ylabel('kWh')
 
+    # Titel
     axs[0, 0].set_title('PV_Sued')
     axs[0, 1].set_title('PV_Ost_West')
     axs[0, 2].set_title('Wind_Onshore')
@@ -359,17 +378,18 @@ def main():
     axs[2, 0].set_title('Hochofen')
     axs[2, 1].set_title('Investitionskosten')
     axs[2, 2].set_title('Wasserstoffverbrauch')
-    axs[3, 0].set_title('Kohleverbauch')
+    axs[3, 0].set_title('Kohleverbrauch')
     axs[3, 1].set_title('el. Speicherkapazität')
     axs[3, 2].set_title('H2 Speicherkapazität')
 
     fig.suptitle('Analyse des Transformationspfads eines Stahlherstellers')
     fig.tight_layout()
-    
-    # Generatorleistungen übereinander
+    plt.show()
+    '''
+        # Generatorleistungen übereinander
     ax = network.generators_t.p.plot(alpha=0.5)
 
-    # Nur die Jahre (Periods) als x-Tick-Labels anzeigen
+        # Nur die Jahre (Periods) als x-Tick-Labels anzeigen
     ax.set_xticks(range(0, len(network.generators_t.p), 2920))  # Setze Positionen
     ax.set_xticklabels(years)
     ax.set_xlabel('year')
@@ -377,7 +397,7 @@ def main():
     ax.legend(loc='upper left')
     plt.tight_layout()
     plt.show()
-
+    '''
 
 if __name__ == "__main__":
     main()

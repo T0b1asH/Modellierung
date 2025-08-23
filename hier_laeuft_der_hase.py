@@ -95,7 +95,7 @@ def erstelle_network(df_pv, df_wind,snapshots):
         name="Netzbezug",
         bus="elektrisches Netz",
         p_nom_extendable=True,
-        capital_cost=147.54,
+        capital_cost=147.54,#müssen wir uns mal noch überlegen
         marginal_cost=strompreis,
         carrier="Stromnetz"
     )
@@ -245,7 +245,7 @@ def erstelle_network(df_pv, df_wind,snapshots):
         name="DRI",
         bus0="Wasserstoff",
         bus1="Stahl",
-        bus2 = "Wasserstoff",
+        bus2 ="Wasserstoff",
         bus3="elektrisches Netz",
         efficiency0 = 1 / wasserstoffverbrauch_pro_kg_stahl_stofflich,
         efficiency2 = - (1 / wasserstoffverbrauch_pro_kg_stahl_energetisch),
