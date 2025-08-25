@@ -11,6 +11,7 @@ import math
 years = [2025, 2030, 2035, 2040, 2045, 2050]
 
 # CO2-Emissionen
+"""
 co2_strommix = {  # Angaben in Gramm / kWh
     2022: 433,  # historisch
     2023: 386,
@@ -21,6 +22,7 @@ co2_strommix = {  # Angaben in Gramm / kWh
 co2_strommix = pd.Series(co2_strommix)
 co2_strommix = co2_strommix.reindex(range(2022, 2051))
 co2_strommix = co2_strommix.interpolate(method="linear")  # Interpolation für fehlende Jahre
+"""
 
 co2_limits = {
     2025: 26097183999886, # Startwert überlegen
@@ -30,9 +32,9 @@ co2_limits = pd.Series(co2_limits)
 co2_limits = co2_limits.reindex(range(2025, 2051))
 co2_limits = co2_limits.interpolate(method="linear")  # Interpolation für fehlende Jahre
 
-strompreis = 0.13 # €/kwh
 
 # Strompreisentwicklung
+"""
 strompreise = { # Angaben in €/kWh
     2025 : 0.13,    # bekannt
     2026 : 0.128,   # Prognosen
@@ -44,7 +46,7 @@ strompreise = strompreise.reindex(range(2025,2051))
 strompreise = strompreise.interpolate(method="linear") # Interpolation für fehlende Jahre
 
 netzbezug_capitalcost = 147.54 # €/kWa
-
+"""
 
 #stahlproduktion = 9_500_000/8760 #t in Format wie oben
 
@@ -54,15 +56,13 @@ DRI_wasserstoffverbrauch_pro_t_stahl_stofflich = 60  # kg H2 pro t Stahl
 DRI_wasserstoffverbrauch_pro_t_stahl_energetisch = 90  # kg H2 pro t Stahl
 DRI_stromverbrauch_pro_t_stahl = 650 # kWh/t Stahl im Lichtbogenofen
 DRI_baukosten = 518.46e6 + 172.5855e6 + 133.0714e6 # Invest. DRI + Rückbau Hochofen + Invest. Lichtbogenofen [Mio. €]
-#betriebskosten_DRI = 586 + 488 #DRI + Lichtbogenofen [€ / t Stahl] hiermit sind KOsten für Wartung, Instandhaltung usw. gemeint
+#betriebskosten_DRI = 586 + 488 #DRI + Lichtbogenofen [€ / t Stahl] hiermit sind Kosten für Wartung, Instandhaltung usw. gemeint
 
 
 HO_betriebskosten = 558.25 #€ wie setzten die sich zusammen?
 HO_kohleverbauch_pro_t_Stahl = 1.6 # t_Kohle/t_Stahl
-#HO_baukosten = 133_071_400 # € kann raus
 
 
-#co2_strommix_2025 = co2_strommix[2025]
 #wasserstoffpreise = 151 #€/kg kann raus, oder?
 
 
@@ -106,7 +106,7 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
     network.add("Carrier", name="Kohle", co2_emissions=co2_kohle)
     network.add("Carrier", name="H2")
     network.add("Carrier", name="Erdgas", co2_emissions=202) # Beispielwert; g CO2 / kWh Erdgas
-    network.add("Carrier", name="Stromnetz", co2_emissions=co2_strommix[year])
+    #network.add("Carrier", name="Stromnetz", co2_emissions=co2_strommix[year])
 
     # Busse
     network.add("Bus", name="elektrisches Netz", carrier="Stromnetz")   # Einheit kWh
@@ -237,9 +237,9 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         name="H2_in_DRI",
         bus0="Wasserstoff",
         bus1="DRI",
-        bus2 = "Wasserstoff",
-        efficiency0 = 1 / DRI_wasserstoffverbrauch_pro_t_stahl_stofflich,
-        efficiency2 = - (1 / DRI_wasserstoffverbrauch_pro_t_stahl_energetisch),
+        #bus2 = "Wasserstoff",
+        efficiency = 1 / (DRI_wasserstoffverbrauch_pro_t_stahl_stofflich + DRI_wasserstoffverbrauch_pro_t_stahl_energetisch),
+        #efficiency2 = - (1 / DRI_wasserstoffverbrauch_pro_t_stahl_energetisch),
         p_nom_extendable=True,
         #marginal_cost = betriebskosten_DRI,
         #capital_cost = DRI_baukosten
@@ -255,7 +255,7 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         bus3="elektrisches Netz",
         efficiency0 = 1 / DRI_wasserstoffverbrauch_pro_t_stahl_stofflich,
         efficiency2 = - (1 / DRI_wasserstoffverbrauch_pro_t_stahl_energetisch),
-        efficiency3 = - (DRI_stromverbrauch_pro_kg_stahl * 1000),
+        efficiency3 = - (DRI_stromverbrauch_pro_t_stahl * 1000),
         p_nom_extendable=True,
         #marginal_cost = betriebskosten_DRI,
         capital_cost = DRI_baukosten
@@ -278,9 +278,9 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         name="Erdgas_in_DRI",
         bus0="Erdgas",
         bus1="DRI",
-        bus2="Erdgas",
-        efficiency0 = 1 / 2777.77, # Erdgas stofflich
-        efficiency2 = - (1 / 3000), # Erdgas energetisch
+        #bus2="Erdgas",
+        efficiency = 1 / (2777.77 + 3000), # Erdgas stofflich
+        #efficiency2 = - (1 / 3000), # Erdgas energetisch
         p_nom_extendable=True,
         #marginal_cost = betriebskosten_DRI,
         #capital_cost = DRI_baukosten
@@ -290,11 +290,12 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
     # DRI-Bus
     network.add(
         "Link",
-        name="DRI",
-        bus0="DRI",
+        name="Lichtbogenofen",
+        bus0="elektrisches Netz",
         bus1="Stahl",
-        bus2="elektrisches Netz",
-        efficiency2 = - 650,
+        bus2="DRI",
+        efficiency0 = (1 / DRI_stromverbrauch_pro_t_stahl),
+        efficiency2 = -1,
         p_nom_extendable = True,
         capital_cost = DRI_baukosten
         )
@@ -317,9 +318,9 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         bus1="Stahl",
         efficiency = 1 / HO_kohleverbauch_pro_t_Stahl, #1 / 1.6,  # 1t Stahl benötigt 1,6t Kohle; 750kg energetisch und 850kg stofflich
         p_nom_extendable=True,
-        p_nom_mod = ((df_stahl["Produzierte Stahlmenge [t/a]"].loc[year] / 8760) * HO_kohleverbauch_pro_t_Stahl) / 5, # stündl. Stahlproduktion durch Effizienz durch Anz. Hochöfen (5)
-        p_nom_max = (df_stahl["Produzierte Stahlmenge [t/a]"].loc[year] / 8760) * HO_kohleverbauch_pro_t_Stahl,
-        p_min_pu = 0.75,
+        p_nom_mod = ((df_stahl["Produzierte Stahlmenge [t/a]"].loc[2025] / 8760) * HO_kohleverbauch_pro_t_Stahl) / 5, # stündl. Stahlproduktion durch Effizienz durch Anz. Hochöfen (5)
+        p_nom_max = (df_stahl["Produzierte Stahlmenge [t/a]"].loc[2025] / 8760) * HO_kohleverbauch_pro_t_Stahl,
+        p_min_pu = 0.95,
         ramp_limit_up = 0.003,
         ramp_limit_dpwn = 0.003,
         marginal_cost = HO_betriebskosten * HO_kohleverbauch_pro_t_Stahl,
@@ -364,7 +365,7 @@ def custom_constraint_rueckbau(network, snapshots):
     
     p_hochofen = model.variables['Link-p_nom']['Hochofen']
     eff_hochofen = network.links.at["Hochofen", "efficiency"]
-    p_dri = model.variables['Link-p_nom']['DRI'] # hier liegt schon t Stahl vor, deswegen keine Effizienz
+    p_dri = model.variables['Link-p_nom']['Lichtbogenofen'] # hier liegt schon t Stahl vor, deswegen keine Effizienz
     
     constraint_expression = (p_hochofen*eff_hochofen + p_dri <= 
                             df_stahl["Produzierte Stahlmenge [t/a]"].loc[year])
@@ -380,13 +381,13 @@ def custom_constraint_brenner(network, snapshots):
 
     eff_h2 = network.links.at["H2_in_Brenner", "efficiency"]
     eff_gas = network.links.at["Erdgas_in_Brenner", "efficiency"]
-    eff_dri = network.links.at["DRI", "efficiency0"]
+    eff_dri = network.links.at["Lichtbogenofen", "efficiency0"]
 
     for t in snapshots:
         model.add_constraints(
             p.at[t, "H2_in_Brenner"] * eff_h2 
           + p.at[t, "Erdgas_in_Brenner"] * eff_gas 
-          - p.at[t, "DRI"] * eff_dri == 0,
+          - p.at[t, "Lichtbogenofen"] * eff_dri == 0,
             name=f"brenner_energy_balance_{t}"
         )
 
@@ -412,8 +413,19 @@ df_stores = pd.DataFrame()
 df_storage_units = pd.DataFrame()
 hochofen_p1 = pd.DataFrame()
 DRI_p1 = pd.DataFrame()
+DRI_p2 = pd.DataFrame()
 stahllager_e = pd.DataFrame()
 generators_p = pd.DataFrame()
+batterie_ladung_p = pd.DataFrame()
+batterie_entladung_p = pd.DataFrame()
+elektrolyse_p = pd.DataFrame()
+H2_speicher_e = pd.DataFrame()
+H2_speicher_p = pd.DataFrame()
+H2_in_DRI_p0 = pd.DataFrame()
+H2_in_DRI_p1 = pd.DataFrame()
+Erdgas_in_DRI_p0 = pd.DataFrame()
+Erdgas_in_DRI_p1 = pd.DataFrame()
+stahlload_p = pd.DataFrame()
 
 # Snapshots erstellen
 snapshots = pd.RangeIndex(8760)
@@ -459,15 +471,46 @@ for year in years:
     df_generators[col_name] = network.generators.p_nom_opt
     df_stores[col_name] = network.stores.e_nom_opt
     df_storage_units[col_name] = network.storage_units.p_nom_opt
-
-    hochofen_p1[col_name] = -network.links_t.p1["Hochofen"]
-    DRI_p1[col_name] = -network.links_t.p1["DRI"]
-    stahllager_e[col_name] = network.stores_t.e["Stahllager"]
     
+    
+    # Zeitreihen auslesen
+    # Generatoren
     for gen_name in network.generators_t.p.columns:
         generators_p[(gen_name, col_name)] = network.generators_t.p[gen_name]
     generators_p[('Gesamt', col_name)] = network.generators_t.p.sum(axis=1)
-
+    
+    # Batteriespeicher
+    batterie_ladung_p[col_name] = network.storage_units_t.p_store["Batteriespeicher"] # Ladung am Bus
+    batterie_entladung_p[col_name] = network.storage_units_t.p_dispatch["Batteriespeicher"] # Entladung am Bus
+    
+    # Elektrolyse
+    elektrolyse_p[col_name] = network.links_t.p0["AEL"] # Input Strom in AEL
+    
+    # H2-Speicher
+    H2_speicher_e[col_name] = network.stores_t.e["H2_Speicher"]
+    H2_speicher_p[col_name] = network.stores_t.p["H2_Speicher"] # positiv entspricht Entladung 
+    
+    # H2 in DRI
+    H2_in_DRI_p0[col_name] = -network.links_t.p0["H2_in_DRI"] # Input H2
+    H2_in_DRI_p1[col_name] = -network.links_t.p1["H2_in_DRI"] # Output Stahl
+    
+    # Erdgas in DRI
+    Erdgas_in_DRI_p0[col_name] = -network.links_t.p0["Erdgas_in_DRI"] # Input Erdgas
+    Erdgas_in_DRI_p1[col_name] = -network.links_t.p1["Erdgas_in_DRI"] # Output Stahl
+    
+    # DRI
+    DRI_p1[col_name] = -network.links_t.p1["Lichtbogenofen"] # Output in Stahl-Bus
+    DRI_p2[col_name] = -network.links_t.p1["Lichtbogenofen"] # Strom in Lichtbogenofen
+    
+    # Hochofen
+    hochofen_p1[col_name] = -network.links_t.p1["Hochofen"] # Output in Stahl-Bus
+    
+    # Stahllager
+    stahllager_e[col_name] = network.stores_t.e["Stahllager"]
+    
+    # Stahl-Load
+    stahlload_p[col_name] = network.loads_t.p["Stahlproduktion"]
+    
 
 # Store- und StorageUnit-Ergebnisse kombinieren
 df_storage_combined = pd.concat([df_stores, df_storage_units])
@@ -612,7 +655,7 @@ plt.show()
 
 # Anzahl Hochöfen und max. Produktion
 # p_nom_mod auslesen und mit Effizienz multiplizieren, weil df_links auch Output ist
-p_nom_mod_hochofen = network.links.at["Hochofen", "p_nom_mod"] * network.links.efficiency["Hochofen"]
+p_nom_mod_hochofen = network.links.at["Hochofen", "p_nom_mod"] #* network.links.efficiency["Hochofen"]
 # Schleife über alle Spalten von df_links und Einlesen des Wertes aus Zeile "Hochofen"
 print("\nAnzahl Hochöfen")
 for label, p_nom_opt_hochofen in df_links.loc["Hochofen"].items():
@@ -620,7 +663,7 @@ for label, p_nom_opt_hochofen in df_links.loc["Hochofen"].items():
     anz_hochofen = round(p_nom_opt_hochofen / p_nom_mod_hochofen)
     
     max_prod = round(hochofen_p1[label].sum())
-    print(f"{label}: {anz_hochofen} Hochöfen mit einer max. stündl. Produktion von {max_prod} t Stahl")
+    print(f"{label}: {anz_hochofen} Hochöfen mit einer jährlichen Produktion von {max_prod} t Stahl")
 
 
 #%% Stahlproduktion nach Links / zeitlicher Verlauf alle Jahre
@@ -670,11 +713,53 @@ for p in szenarien:
     plt.tight_layout()
     plt.show()
 
+"""
+# einzelne Jahre gesamte Stahlproduktion
+for p in szenarien:
+    fig, ax1 = plt.subplots(figsize=(14, 8))
+    # Primärachse für Hochofen & DRI
+    (hochofen_p1[p]+DRI_p1[p]).plot(ax=ax1, label="ges. Stahproduktion", color="black", alpha=0.7)
+    #stahlload_p[p].plot(ax=ax1, label="Stahlbedarf", color="orange")
+    ax1.set_ylabel("Stahl [t]")
+    ax1.set_xlabel("Zeit")
+    ax1.grid(True, linestyle="--", alpha=0.5)
+    # Sekundärachse für Stahllager
+    ax2 = ax1.twinx()
+    stahllager_e[p].plot(ax=ax2, label="Füllstand Stahllager", color="green", linestyle="dotted")
+    ax2.set_ylabel("Füllstand Stahllager [t]")
+    # Legenden zusammenführen
+    lines_1, labels_1 = ax1.get_legend_handles_labels()
+    lines_2, labels_2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines_1 + lines_2, labels_1 + labels_2, title="Link", loc="upper center", bbox_to_anchor=(0.5, -0.1), ncol=3, frameon=False)
+    # plotten
+    plt.title(f"Zeitlicher Verlauf der gesamten Stahlproduktion und Füllstand Stahllager; {p}")
+    plt.tight_layout()
+    plt.show()
+"""
 
-
-
-
-
+#%% Analyse Hochofenroute
+"""
+for p in szenarien:
+    fig, ax1 = plt.subplots(figsize=(14, 8))
+    # Primärachse für Hochofen & DRI
+    (H2_in_DRI_p1[p]+Erdgas_in_DRI_p1[p]).plot(ax=ax1, label="Stahl aus H2 und Erdgas", color="orange")
+    #Erdgas_in_DRI_p1[p].plot(ax=ax1, label="Kohle-Generator normiert auf Stahl", color="black", alpha=0.7)
+    ax1.set_ylabel("Stahl [t]")
+    ax1.set_xlabel("Zeit")
+    ax1.grid(True, linestyle="--", alpha=0.5)
+    # Sekundärachse für Stahllager
+    ax2 = ax1.twinx()
+    stahllager_e[p].plot(ax=ax2, label="Füllstand Stahllager", color="green", linestyle="dotted")
+    ax2.set_ylabel("Füllstand Stahllager [t]")
+    # Legenden zusammenführen
+    lines_1, labels_1 = ax1.get_legend_handles_labels()
+    lines_2, labels_2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines_1 + lines_2, labels_1 + labels_2, title="Link", loc="upper center", bbox_to_anchor=(0.5, -0.1), ncol=3, frameon=False)
+    # plotten
+    plt.title(f"Zeitlicher Verlauf der gesamten Stahlproduktion und Füllstand Stahllager; {p}")
+    plt.tight_layout()
+    plt.show()
+"""
 #if __name__ == "__main__":
  #   main()
  
