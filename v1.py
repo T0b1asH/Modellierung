@@ -39,7 +39,7 @@ strompreise = { # Angaben in €/kWh
     2025 : 0.13,    # bekannt
     2026 : 0.128,   # Prognosen
     2031 : 0.076,
-    2050 : 0.059
+    2050 : 0.059 # Quelle? wollten ja eigentlich von einer Strompereissenkung ausgehen
     }
 strompreise = pd.Series(strompreise)
 strompreise = strompreise.reindex(range(2025,2051))
@@ -200,9 +200,9 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         p_nom_extendable=True,
         p_nom_min=2000,
         # p_nom_max = ,
-        capital_cost=0.875,
+        capital_cost=1200,
         # Alle Kosten der Elektrolysen könnte man nochmal prüfen, da wir einige verschiedene haben
-        marginal_cost=0.875 * 0.04
+        marginal_cost=1200 * 0.04
         )
     
     """
@@ -227,12 +227,12 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         bus="Wasserstoff",
         e_nom_extendable=True,
         e_initial=0,
-        capital_cost=9,
+        capital_cost=9,# wahrscheinlich noch billiger, weils n salzkaverne ist
         marginal_cost=0.45,
         standing_loss=2.084e-5,  # 0,05%/Tag -> 0,0005/Tag/unit -> (1-x)^24 = 1 - 0,0005
     )
 
-    network.add(
+    network.add(#wirkt irgendwie so als wäre ein Multi unnötig, da man ja zwei mal vom gleichen Bus aus startet
         "Link",
         name="H2_in_DRI",
         bus0="Wasserstoff",
@@ -263,7 +263,7 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
     """
 
     # Erdgas-Bus
-    network.add(
+    network.add( #maximale Kapazität muss hier noch rein, weil eine ja schon eine Leitung liegt
         "Generator",
         name="Erdgas_Pipeline",
         bus="Erdgas",
@@ -418,7 +418,8 @@ stahllager_e = pd.DataFrame()
 generators_p = pd.DataFrame()
 batterie_ladung_p = pd.DataFrame()
 batterie_entladung_p = pd.DataFrame()
-elektrolyse_p = pd.DataFrame()
+elektrolyse_p_input = pd.DataFrame()
+elektrolyse_p_output = pd.DataFrame()
 H2_speicher_e = pd.DataFrame()
 H2_speicher_p = pd.DataFrame()
 H2_in_DRI_p0 = pd.DataFrame()
@@ -484,7 +485,9 @@ for year in years:
     batterie_entladung_p[col_name] = network.storage_units_t.p_dispatch["Batteriespeicher"] # Entladung am Bus
     
     # Elektrolyse
-    elektrolyse_p[col_name] = network.links_t.p0["AEL"] # Input Strom in AEL
+    elektrolyse_p_input[col_name] = network.links_t.p0["AEL"] # Input Strom in AEL
+    elektrolyse_p_output[col_name] = network.links_t.p1["AEL"]
+
     
     # H2-Speicher
     H2_speicher_e[col_name] = network.stores_t.e["H2_Speicher"]
@@ -510,6 +513,7 @@ for year in years:
     
     # Stahl-Load
     stahlload_p[col_name] = network.loads_t.p["Stahlproduktion"]
+
     
 
 # Store- und StorageUnit-Ergebnisse kombinieren
@@ -523,8 +527,9 @@ generators_p_energetisch = generators_p.copy()
 
 # Heizwert Kohle
 heizwert_kohle = 4.17e3 # kWh/t
+print (generators_p_energetisch)
 
-kohle_spalten = [col for col in generators_p.columns if col[0] == "Kohle"] # alle Spalten mit "Kohle" einlesen
+kohle_spalten = [col for col in generators_p.columns if col.startswith("Kohle")] # alle Spalten mit "Kohle" einlesen
 generators_p_energetisch.loc[:, kohle_spalten] = generators_p.loc[:, kohle_spalten] *heizwert_kohle # Umrechnung von t auf kWh
 generators_p_energetisch.columns = pd.MultiIndex.from_tuples(generators_p_energetisch.columns) # Index zu MultiIndex machen
 
