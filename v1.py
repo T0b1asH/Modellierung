@@ -448,6 +448,10 @@ for year in years:
     threads=4,
     extra_functionality=custom_constraint_rueckbau
     )
+    storage_units_emissions = network.storage_units["co2_emissions"]
+    storage_emissions = network.storage["co2_emissions"]
+    print(f"Emissionen StorageUnits: {storage_units_emissions}")
+    print(f"Storage Emissions: {storage_emissions}")
 
     # Ergebnisse berechnen
     gen_p = network.generators_t.p
@@ -529,7 +533,7 @@ generators_p_energetisch = generators_p.copy()
 heizwert_kohle = 4.17e3 # kWh/t
 print (generators_p_energetisch)
 
-kohle_spalten = [col for col in generators_p.columns if col.startswith("Kohle")] # alle Spalten mit "Kohle" einlesen
+kohle_spalten = [col for col in generators_p.columns if col[0] == "Kohle"] # alle Spalten mit "Kohle" einlesen
 generators_p_energetisch.loc[:, kohle_spalten] = generators_p.loc[:, kohle_spalten] *heizwert_kohle # Umrechnung von t auf kWh
 generators_p_energetisch.columns = pd.MultiIndex.from_tuples(generators_p_energetisch.columns) # Index zu MultiIndex machen
 
