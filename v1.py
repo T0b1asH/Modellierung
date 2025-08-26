@@ -24,8 +24,8 @@ co2_strommix = co2_strommix.reindex(range(2022, 2051))
 co2_strommix = co2_strommix.interpolate(method="linear")  # Interpolation für fehlende Jahre
 """
 
-co2_limits = {
-    2025: 26097183999886, # Startwert überlegen
+co2_limits = { # in t
+    2025: 26097183999886e-6, # Startwert überlegen
     2050: 0
 }
 co2_limits = pd.Series(co2_limits)
@@ -50,8 +50,14 @@ netzbezug_capitalcost = 147.54 # €/kWa
 
 #stahlproduktion = 9_500_000/8760 #t in Format wie oben
 
-co2_kohle = 769230 + 947690  # Gramm / Tonne Kohle; stofflich + energetisch
+co2_ee = 0
+co2_kohle = 769230e-6 + 947690e-6 # Tonnen CO2 / Tonne Kohle; stofflich + energetisch
+co2_gas = 202e-6
 
+# Heizwert Kohle
+heizwert_kohle = 4.17e3 # kWh/t
+
+# Direktreduktion
 DRI_wasserstoffverbrauch_pro_t_stahl_stofflich = 60  # kg H2 pro t Stahl
 DRI_wasserstoffverbrauch_pro_t_stahl_energetisch = 90  # kg H2 pro t Stahl
 DRI_stromverbrauch_pro_t_stahl = 650 # kWh/t Stahl im Lichtbogenofen
@@ -59,6 +65,7 @@ DRI_baukosten = 518.46e6 + 172.5855e6 + 133.0714e6 # Invest. DRI + Rückbau Hoch
 #betriebskosten_DRI = 586 + 488 #DRI + Lichtbogenofen [€ / t Stahl] hiermit sind Kosten für Wartung, Instandhaltung usw. gemeint
 
 
+# Hochofen
 HO_betriebskosten = 558.25 #€ wie setzten die sich zusammen?
 HO_kohleverbauch_pro_t_Stahl = 1.6 # t_Kohle/t_Stahl
 
@@ -102,10 +109,10 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
     network.set_snapshots(snapshots)
 
     # Carrier für CO2-Emissionen
-    network.add("Carrier", name="EE", co2_emissions=0)
+    network.add("Carrier", name="EE", co2_emissions=co2_ee)
     network.add("Carrier", name="Kohle", co2_emissions=co2_kohle)
     network.add("Carrier", name="H2")
-    network.add("Carrier", name="Erdgas", co2_emissions=202) # Beispielwert; g CO2 / kWh Erdgas
+    network.add("Carrier", name="Erdgas", co2_emissions=co2_gas)
     #network.add("Carrier", name="Stromnetz", co2_emissions=co2_strommix[year])
 
     # Busse
@@ -179,11 +186,9 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         name="Batteriespeicher",
         bus="elektrisches Netz",
         p_nom_extendable=True,
-        # p_nom_min = ,
-        p_nom_max = 0.5e6,
+        #p_nom_max = 0.5e6,
         marginal_cost=0.45,
         capital_cost=1000,
-        # state_of_charge_initial = 0,
         max_hours=4,  # Stunden bei voller Leistung -> bestimmt Kapazität
         efficiency_store=0.97,
         efficiency_dispatch=0.97,
@@ -199,9 +204,7 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         efficiency=0.7/33.33, # 70% Effizienz energiebezogen
         p_nom_extendable=True,
         p_nom_min=2000,
-        # p_nom_max = ,
         capital_cost=1200,
-        # Alle Kosten der Elektrolysen könnte man nochmal prüfen, da wir einige verschiedene haben
         marginal_cost=1200 * 0.04
         )
     
@@ -239,10 +242,7 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         bus1="DRI",
         #bus2 = "Wasserstoff",
         efficiency = 1 / (DRI_wasserstoffverbrauch_pro_t_stahl_stofflich + DRI_wasserstoffverbrauch_pro_t_stahl_energetisch),
-        #efficiency2 = - (1 / DRI_wasserstoffverbrauch_pro_t_stahl_energetisch),
-        p_nom_extendable=True,
-        #marginal_cost = betriebskosten_DRI,
-        #capital_cost = DRI_baukosten
+        p_nom_extendable=True
     )
 
     """
@@ -261,7 +261,7 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         capital_cost = DRI_baukosten
     )
     """
-
+    
     # Erdgas-Bus
     network.add(
         "Generator",
@@ -279,11 +279,8 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         bus0="Erdgas",
         bus1="DRI",
         #bus2="Erdgas",
-        efficiency = 1 / (2777.77 + 3000), # Erdgas stofflich
-        #efficiency2 = - (1 / 3000), # Erdgas energetisch
-        p_nom_extendable=True,
-        #marginal_cost = betriebskosten_DRI,
-        #capital_cost = DRI_baukosten
+        efficiency = 1 / (2777.77 + 3000), # Erdgas stofflich + energetisch
+        p_nom_extendable=True
     )
     
     
@@ -321,7 +318,7 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         p_nom_max = (df_stahl["Produzierte Stahlmenge [t/a]"].loc[2025] / 8760) * HO_kohleverbauch_pro_t_Stahl,
         p_min_pu = 0.95,
         ramp_limit_up = 0.003,
-        ramp_limit_dpwn = 0.003,
+        ramp_limit_down = 0.003,
         marginal_cost = HO_betriebskosten * HO_kohleverbauch_pro_t_Stahl,
     )
     
@@ -338,7 +335,6 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         "Store",
         name="Stahllager",
         bus="Stahl",
-        #e_nom_extendable=True,
         e_nom = 50000,
         e_initial = 0,
     )
@@ -526,9 +522,6 @@ df_storage_combined = pd.concat([df_stores, df_storage_units])
 # Kopie des Generators mit Leistungs-Zeitreihen erstellen
 generators_p_energetisch = generators_p.copy()
 
-# Heizwert Kohle
-heizwert_kohle = 4.17e3 # kWh/t
-
 kohle_spalten = [col for col in generators_p.columns if col[0] == "Kohle"] # alle Spalten mit "Kohle" einlesen
 generators_p_energetisch.loc[:, kohle_spalten] = generators_p.loc[:, kohle_spalten] *heizwert_kohle # Umrechnung von t auf kWh
 generators_p_energetisch.columns = pd.MultiIndex.from_tuples(generators_p_energetisch.columns) # Index zu MultiIndex machen
@@ -577,7 +570,7 @@ for year in years:
     ("Wind" in name or "PV" in name) and str(year) in str(j)
     for (name, j) in generators_p.columns
     ]
-    
+    """
     fig, ax1 = plt.subplots(figsize=(14, 8))
     # Primärachse für Hochofen & DRI
     (generators_p.loc[:, mask].sum(axis=1)).plot(ax=ax1, label="Stromerzeugung")
@@ -598,15 +591,15 @@ for year in years:
     plt.title(f"Stromproduktion und -verbrauch; {year}")
     plt.tight_layout()
     plt.show()
-
+    """
     
 
 #%% Diagramm Emissionen
 fig, axs = plt.subplots(nrows=1, ncols=2, figsize=(15, 10))
 df_emissionen.T.plot(subplots=True, ax=axs)
 
-axs[0].set_ylabel('g')
-axs[1].set_ylabel('g')
+axs[0].set_ylabel('t CO2')
+axs[1].set_ylabel('t CO2')
 
 axs[0].set_title('CO2-Limit')
 axs[1].set_title('Tatsächliche CO2-Emissionen')
@@ -802,6 +795,9 @@ for p in szenarien:
     plt.tight_layout()
     plt.show()
 """
+
+
+
 #if __name__ == "__main__":
  #   main()
  
