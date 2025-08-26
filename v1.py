@@ -200,9 +200,9 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         p_nom_extendable=True,
         p_nom_min=2000,
         # p_nom_max = ,
-        capital_cost=0.875,
+        capital_cost=1200,
         # Alle Kosten der Elektrolysen könnte man nochmal prüfen, da wir einige verschiedene haben
-        marginal_cost=0.875 * 0.04
+        marginal_cost=1200 * 0.04
         )
     
     """
@@ -291,11 +291,10 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
     network.add(
         "Link",
         name="Lichtbogenofen",
-        bus0="elektrisches Netz",
+        bus0="DRI",
         bus1="Stahl",
-        bus2="DRI",
-        efficiency0 = (1 / DRI_stromverbrauch_pro_t_stahl),
-        efficiency2 = -1,
+        bus2="elektrisches Netz",
+        efficiency2 = - DRI_stromverbrauch_pro_t_stahl,
         p_nom_extendable = True,
         capital_cost = DRI_baukosten
         )
@@ -412,13 +411,16 @@ df_links = pd.DataFrame()
 df_stores = pd.DataFrame()
 df_storage_units = pd.DataFrame()
 hochofen_p1 = pd.DataFrame()
+DRI_p0 = pd.DataFrame()
 DRI_p1 = pd.DataFrame()
 DRI_p2 = pd.DataFrame()
 stahllager_e = pd.DataFrame()
 generators_p = pd.DataFrame()
 batterie_ladung_p = pd.DataFrame()
 batterie_entladung_p = pd.DataFrame()
-elektrolyse_p = pd.DataFrame()
+batterie_soc = pd.DataFrame()
+elektrolyse_p0 = pd.DataFrame()
+elektrolyse_p1 = pd.DataFrame()
 H2_speicher_e = pd.DataFrame()
 H2_speicher_p = pd.DataFrame()
 H2_in_DRI_p0 = pd.DataFrame()
@@ -463,10 +465,10 @@ for year in years:
         "CO2-Emissionen": emissions_ges
     })
     # Effizienzen einlesen
-    #eff_links = network.links.efficiency.copy()
+    eff_links = network.links.efficiency.copy()
     #special_links = ["H2_in_DRI", "Erdgas_in_DRI"]
     #eff_links.loc[special_links] = network.links.loc[special_links, "efficiency0"] # efficiency0 für special_links
-    df_links[col_name] = network.links.p_nom_opt #* eff_links
+    df_links[col_name] = network.links.p_nom_opt * eff_links
     
     df_generators[col_name] = network.generators.p_nom_opt
     df_stores[col_name] = network.stores.e_nom_opt
@@ -482,9 +484,11 @@ for year in years:
     # Batteriespeicher
     batterie_ladung_p[col_name] = network.storage_units_t.p_store["Batteriespeicher"] # Ladung am Bus
     batterie_entladung_p[col_name] = network.storage_units_t.p_dispatch["Batteriespeicher"] # Entladung am Bus
+    batterie_soc[col_name] = network.storage_units_t.state_of_charge["Batteriespeicher"] # SoC
     
     # Elektrolyse
-    elektrolyse_p[col_name] = network.links_t.p0["AEL"] # Input Strom in AEL
+    elektrolyse_p0[col_name] = network.links_t.p0["AEL"] # Input Strom in AEL
+    elektrolyse_p1[col_name] = network.links_t.p1["AEL"] # Output H2 aus AEL
     
     # H2-Speicher
     H2_speicher_e[col_name] = network.stores_t.e["H2_Speicher"]
@@ -498,9 +502,10 @@ for year in years:
     Erdgas_in_DRI_p0[col_name] = -network.links_t.p0["Erdgas_in_DRI"] # Input Erdgas
     Erdgas_in_DRI_p1[col_name] = -network.links_t.p1["Erdgas_in_DRI"] # Output Stahl
     
-    # DRI
+    # DRI / Lichtbogenofen
+    DRI_p0[col_name] = network.links_t.p0["Lichtbogenofen"] # Strom in Lichtbogenofen
     DRI_p1[col_name] = -network.links_t.p1["Lichtbogenofen"] # Output in Stahl-Bus
-    DRI_p2[col_name] = -network.links_t.p1["Lichtbogenofen"] # Strom in Lichtbogenofen
+    DRI_p2[col_name] = network.links_t.p2["Lichtbogenofen"] # Stahl aus DRI-Bus
     
     # Hochofen
     hochofen_p1[col_name] = -network.links_t.p1["Hochofen"] # Output in Stahl-Bus
@@ -558,6 +563,43 @@ print("\nEnergiebedarf ohne Kohle") # ausgeben
 for spalte, wert in summen_ohne_kohle.items():
     print(f"{spalte}: {round(wert/1e6)} GWh")
 
+
+#%% Auslastung Anlagen
+
+auslastung_anlagen = pd.DataFrame(index = ["Wind_Onshore", "Wind_Offshore", "AEL"], columns = years)
+
+for year in years:
+    auslastung_anlagen.at["Wind_Onshore", year] = np.nan_to_num(generators_p[('Wind_Onshore', str(year))].mean() / df_generators.at["Wind_Onshore", str(year)], nan=0)
+    auslastung_anlagen.at["Wind_Offshore", year] = np.nan_to_num(generators_p[('Wind_Offshore', str(year))].mean() / df_generators.at["Wind_Offshore", str(year)], nan=0)
+    auslastung_anlagen.at["AEL", year] = np.nan_to_num(elektrolyse_p0[str(year)].mean() / df_links.at["AEL", str(year)], nan=0)
+    
+    mask = [
+    ("Wind" in name or "PV" in name) and str(year) in str(j)
+    for (name, j) in generators_p.columns
+    ]
+    
+    fig, ax1 = plt.subplots(figsize=(14, 8))
+    # Primärachse für Hochofen & DRI
+    (generators_p.loc[:, mask].sum(axis=1)).plot(ax=ax1, label="Stromerzeugung")
+    #DRI_p2[str(year)].plot(ax=ax1, label="Strom in Lichtbogenofen")
+    elektrolyse_p0[str(year)].plot(ax=ax1, label="Strom in AEL")
+    ax1.set_ylabel("Stahl [t]")
+    ax1.set_xlabel("Zeit")
+    ax1.grid(True, linestyle="--", alpha=0.5)
+    # Sekundärachse für Stahllager
+    ax2 = ax1.twinx()
+    #stahllager_e[p].plot(ax=ax2, label="Füllstand Stahllager", color="green", linestyle="dotted")
+    #ax2.set_ylabel("Füllstand Stahllager [t]")
+    # Legenden zusammenführen
+    lines_1, labels_1 = ax1.get_legend_handles_labels()
+    lines_2, labels_2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines_1 + lines_2, labels_1 + labels_2, title="Link", loc="upper center", bbox_to_anchor=(0.5, -0.1), ncol=3, frameon=False)
+    # plotten
+    plt.title(f"Stromproduktion und -verbrauch; {year}")
+    plt.tight_layout()
+    plt.show()
+
+    
 
 #%% Diagramm Emissionen
 fig, axs = plt.subplots(nrows=1, ncols=2, figsize=(15, 10))
@@ -655,7 +697,7 @@ plt.show()
 
 # Anzahl Hochöfen und max. Produktion
 # p_nom_mod auslesen und mit Effizienz multiplizieren, weil df_links auch Output ist
-p_nom_mod_hochofen = network.links.at["Hochofen", "p_nom_mod"] #* network.links.efficiency["Hochofen"]
+p_nom_mod_hochofen = network.links.at["Hochofen", "p_nom_mod"] * network.links.efficiency["Hochofen"]
 # Schleife über alle Spalten von df_links und Einlesen des Wertes aus Zeile "Hochofen"
 print("\nAnzahl Hochöfen")
 for label, p_nom_opt_hochofen in df_links.loc["Hochofen"].items():
