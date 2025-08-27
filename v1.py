@@ -8,22 +8,14 @@ import math
 #%% Variablen einlesen
 
 # betrachtete Jahre
-years = [2025, 2030, 2035, 2040, 2045, 2050]
+years = [2025, 2030, 2035, 2040, 2045]
 
 co2_limits = {
     2025: 26097183999886e-6,
-    2050: 0
+    2045: 0
 }
-
-annuitaet_10a = 0.1113                                              # 2% Zinssatz
-annuitaet_15a = 0.0778                                              # 2% Zinssatz
-annuitaet_20a = 0.0612                                              # 2% Zinssatz
-annuitaet_25a = 0.0512                                              # 2% Zinssatz
-annuitaet_30a = 0.0446                                              # 2% Zinssatz
-annuitaet_50a = 0.0318                                              # 2% Zinssatz
-
 co2_limits = pd.Series(co2_limits)
-co2_limits = co2_limits.reindex(range(2025, 2051))
+co2_limits = co2_limits.reindex(range(2025, 2046))
 co2_limits = co2_limits.interpolate(method="linear")                # Interpolation für fehlende Jahre
 
 
@@ -36,7 +28,7 @@ heizwert_kohle = 4.17e3                                             # kWh/t
 
 # Direktreduktion
 DRI_wasserstoffverbrauch_pro_t_stahl_stofflich = 60                 # kg H2 pro t Stahl
-DRI_wasserstoffverbrauch_pro_t_stahl_energetisch = 90               # kg H2 pro t Stahl
+DRI_wasserstoffverbrauch_pro_t_stahl_energetisch = 30               # kg H2 pro t Stahl
 DRI_stromverbrauch_pro_t_stahl = 650                                # kWh/t Stahl im Lichtbogenofen
 #DRI_Lichtbogen_baukosten = 518.46e6 + 172.5855e6 + 133.0714e6      # Invest. DRI + Rückbau Hochofen + Invest. Lichtbogenofen [Mio. €]
 DRI_Lichtbogen_baukosten = 2_185e6 + 172.6e6 + 1_605.5e6            # Invest. DRI + Rückbau Hochofen + Invest. Lichtbogenofen [Mio. €]
@@ -47,6 +39,14 @@ DRI_Lichtbogen_betriebskosten = 11.19 + 27.54                       # DRI €/t 
 HO_betriebskosten = 77.47                                           # €/ t Stahl ohne Ressourcen
 HO_kohleverbauch_pro_t_Stahl = 1.6                                  # t Kohle/t Stahl
 
+
+# Annuitäten
+annuitaet_10a = 0.1113                                              # 2% Zinssatz
+annuitaet_15a = 0.0778                                              # 2% Zinssatz
+annuitaet_20a = 0.0612                                              # 2% Zinssatz
+annuitaet_25a = 0.0512                                              # 2% Zinssatz
+annuitaet_30a = 0.0446                                              # 2% Zinssatz
+annuitaet_50a = 0.0318                                              # 2% Zinssatz
 
 
 #%% Daten einlesen
@@ -212,9 +212,9 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         name="Salzkaverne_ein",
         bus0="Wasserstoff",
         bus1="Salzkaverne_bus",
-        #p_nom_max = 30,
+        p_nom_max = 10_000, # https://www.icis.com/explore/resources/news/2023/05/09/10883508/hydrogen-storage-open-season-announced-by-gasunie/
         p_nom_extendable=True,
-        efficiency=0.98**0.5
+        efficiency=0.915**0.5 # https://www.irena.org/-/media/Files/IRENA/Agency/Publication/2020/Dec/IRENA_Green_hydrogen_cost_2020.pdf
     )
     network.add(
         "Link",
@@ -222,8 +222,8 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         bus0="Salzkaverne_bus",
         bus1="Wasserstoff",
         p_nom_extendable=True,
-        #p_nom_max = 30,
-        efficiency=0.98**0.5
+        p_nom_max = 52_000, # https://www.icis.com/explore/resources/news/2023/05/09/10883508/hydrogen-storage-open-season-announced-by-gasunie/
+        efficiency=0.915**0.5
     )
 
     network.add(
@@ -238,11 +238,12 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
     # Erdgas-Bus
     network.add(
         "Generator",
-        name="Erdgas_Pipeline",
+        name="Erdgas",
         bus="Erdgas",
         p_nom_extendable=True,
-        capital_cost=100,                                                           # !!!ARSCHFICK!!! geschätzt; Leistungspreis nachgucken
-        marginal_cost=0.08,                                                         # geschätzt; €/kWh
+        capital_cost=7, # https://www.stadtwerke-elmshorn.de/de/Privatkunden/Netze/Gasnetz/Gasnetz-Relaunch/Netzzugang-Netznutzungsentgelte-/Stadtwerke-Elmshorn-Preisblatt-NNE-Gas-2025.pdf
+        # !!!ARSCHFICK!!! geschätzt; Leistungspreis nachgucken
+        marginal_cost=0.02, # selbe Quelle; genauere Schätzung                      # geschätzt; €/kWh
         carrier="Erdgas"
     )
     
@@ -251,7 +252,7 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         name="Erdgas_in_DRI",
         bus0="Erdgas",
         bus1="DRI",
-        efficiency = 1 / (2777.77 + 3000),                                          # Erdgas stofflich + energetisch
+        efficiency = 1 / (2777.77 + 1000),                                          # Erdgas stofflich + energetisch
         p_nom_extendable=True
     )
     
@@ -265,6 +266,7 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         bus2="Strom",
         efficiency2 = - DRI_stromverbrauch_pro_t_stahl,
         p_nom_extendable = True,
+        #p_min_pu = 
         capital_cost = DRI_Lichtbogen_baukosten * annuitaet_30a,
         marginal_cost = DRI_Lichtbogen_betriebskosten
         )
@@ -309,7 +311,6 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         name="Stahllager",
         bus="Stahl",
         e_nom = 50000,
-        e_initial = 0,
     )
     
 
@@ -354,9 +355,10 @@ DRI_p1 = pd.DataFrame()
 DRI_p2 = pd.DataFrame()
 stahllager_e = pd.DataFrame()
 generators_p = pd.DataFrame()
-batterie_ladung_p = pd.DataFrame()
-batterie_entladung_p = pd.DataFrame()
+#batterie_ladung_p = pd.DataFrame()
+#batterie_entladung_p = pd.DataFrame()
 batterie_soc = pd.DataFrame()
+batterie_p  = pd.DataFrame()
 elektrolyse_p0 = pd.DataFrame()
 elektrolyse_p1 = pd.DataFrame()
 H2_speicher_e = pd.DataFrame()
@@ -374,6 +376,8 @@ df_stahl, df_pv, df_wind = lade_daten(snapshots)
 
 # Schleife über Jahre
 for year in years:
+    
+    print(f"Ich bin in Jahr {year}")
     
     network = erstelle_network(df_stahl, df_pv, df_wind, snapshots, year)
     
@@ -404,8 +408,10 @@ for year in years:
     })
 
     # Effizienzen einlesen
-    eff_links = network.links.efficiency.copy()
-    df_links[col_name] = network.links.p_nom_opt * eff_links
+    eff_links = network.links.efficiency
+    special_links = ["Lichtbogenofen"]
+    eff_links.loc[special_links] = -network.links.loc[special_links, "efficiency2"] 
+    df_links[col_name] = network.links.p_nom_opt * eff_links # Output der Links
     
     df_generators[col_name] = network.generators.p_nom_opt
     df_stores[col_name] = network.stores.e_nom_opt
@@ -423,26 +429,30 @@ for year in years:
     #batterie_entladung_p[col_name] = network.storage_units_t.p_dispatch["Batteriespeicher"] # Entladung am Bus
     #batterie_soc[col_name] = network.storage_units_t.state_of_charge["Batteriespeicher"] # SoC
     
+    # Batteriespeicher
+    batterie_soc[col_name] = network.stores_t.e["Batteriespeicher"]
+    batterie_p[col_name] = network.stores_t.p["Batteriespeicher"] # positiv entspricht Entladung 
+    
     # Elektrolyse
     elektrolyse_p0[col_name] = network.links_t.p0["AEL"] # Input Strom in AEL
-    elektrolyse_p1[col_name] = network.links_t.p1["AEL"] # Output H2 aus AEL
+    elektrolyse_p1[col_name] = -network.links_t.p1["AEL"] # Output H2 aus AEL
     
     # H2-Speicher
     H2_speicher_e[col_name] = network.stores_t.e["H2_Speicher"]
     H2_speicher_p[col_name] = network.stores_t.p["H2_Speicher"] # positiv entspricht Entladung 
     
     # H2 in DRI
-    H2_in_DRI_p0[col_name] = -network.links_t.p0["H2_in_DRI"] # Input H2
+    H2_in_DRI_p0[col_name] = network.links_t.p0["H2_in_DRI"] # Input H2
     H2_in_DRI_p1[col_name] = -network.links_t.p1["H2_in_DRI"] # Output Stahl
     
     # Erdgas in DRI
-    Erdgas_in_DRI_p0[col_name] = -network.links_t.p0["Erdgas_in_DRI"] # Input Erdgas
+    Erdgas_in_DRI_p0[col_name] = network.links_t.p0["Erdgas_in_DRI"] # Input Erdgas
     Erdgas_in_DRI_p1[col_name] = -network.links_t.p1["Erdgas_in_DRI"] # Output Stahl
     
     # DRI / Lichtbogenofen
-    DRI_p0[col_name] = network.links_t.p0["Lichtbogenofen"] # Strom in Lichtbogenofen
-    DRI_p1[col_name] = -network.links_t.p1["Lichtbogenofen"] # Output in Stahl-Bus
-    DRI_p2[col_name] = network.links_t.p2["Lichtbogenofen"] # Stahl aus DRI-Bus
+    DRI_p0[col_name] = network.links_t.p0["Lichtbogenofen"] # Output Stahl aus DRI-Bus
+    DRI_p1[col_name] = -network.links_t.p1["Lichtbogenofen"] # Input Stahl in Stahl-Bus
+    DRI_p2[col_name] = network.links_t.p2["Lichtbogenofen"] # Strom in Lichtbogenofen
     
     # Hochofen
     hochofen_p1[col_name] = -network.links_t.p1["Hochofen"] # Output in Stahl-Bus
@@ -498,42 +508,229 @@ for spalte, wert in summen_ohne_kohle.items():
     print(f"{spalte}: {round(wert/1e6)} GWh")
 
 
+#%% Sankey-Diagramm
+
+import plotly.graph_objects as go
+
+for year in years:
+    # --- Knoten ---
+    nodes = [
+        "PV_Sued", "PV_Ost_West", "Wind_Onshore", "Wind_Offshore",
+        "Strom_Bus",
+        "Elektrolyse", "Lichtbogenofen", "Batterieverluste",
+        "Verluste Elektrolyse", "H2_Bus", "Erdgas_Bus",
+        "DRI", "H2_Speicherverluste", "Hochofen",
+        "Stahl"
+    ]
+
+    # Farben als Mapping (Name -> Farbe); fehlende bekommen Default
+    node_color_map = {
+        "PV_Sued": "#FFD43B",
+        "PV_Ost_West": "#FFE680",
+        "Wind_Onshore": "#6AA5FF",
+        "Wind_Offshore": "#3B7DDD",
+        "Strom_Bus": "#0B6623",
+        "Elektrolyse": "#5DADE2",
+        "Lichtbogenofen": "#E74C3C",
+        "Batterieverluste": "#B56576",
+        "Verluste Elektrolyse": "#C0392B",
+        "H2_Bus": "#8E44AD",
+        "Erdgas_Bus": "#2E8B57",
+        "DRI": "#7FB3D5",
+        "H2_Speicherverluste": "#A569BD",
+        "Hochofen": "#795548",
+        "Stahl": "#7F8C8D",
+    }
+    default_color = "#CCCCCC"
+    node_colors = [node_color_map.get(n, default_color) for n in nodes]
+
+    # Hilfen
+    idx = {name: i for i, name in enumerate(nodes)}
+    def rgba(hex_color, alpha=0.4):
+        h = hex_color.lstrip("#")
+        r, g, b = [int(h[i:i+2], 16) for i in (0, 2, 4)]
+        return f"rgba({r},{g},{b},{alpha})"
+
+    # --- Daten (achte auf Einheiten-Konsistenz!) ---
+    # Batterie-"Verluste" hier als Rest (kann negativ sein -> clip unten)
+    batterieverluste = (
+        generators_p[('PV_Sued', str(year))].sum()
+        + generators_p[('PV_Ost_West', str(year))].sum()
+        + generators_p[('Wind_Onshore', str(year))].sum()
+        + generators_p[('Wind_Offshore', str(year))].sum()
+        - elektrolyse_p0[str(year)].sum()
+        - DRI_p2[str(year)].sum()
+    )
+
+    links = [
+        ("PV_Sued",       "Strom_Bus", generators_p[('PV_Sued', str(year))].sum()),
+        ("PV_Ost_West",   "Strom_Bus", generators_p[('PV_Ost_West', str(year))].sum()),
+        ("Wind_Onshore",  "Strom_Bus", generators_p[('Wind_Onshore', str(year))].sum()),
+        ("Wind_Offshore", "Strom_Bus", generators_p[('Wind_Offshore', str(year))].sum()),
+
+        ("Strom_Bus",     "Elektrolyse",      elektrolyse_p0[str(year)].sum()),
+        ("Strom_Bus",     "Lichtbogenofen",   DRI_p2[str(year)].sum()),
+        ("Strom_Bus",     "Batterieverluste", batterieverluste),
+
+        ("Elektrolyse",   "H2_Bus",                 elektrolyse_p1[str(year)].sum()),
+        ("Elektrolyse",   "Verluste Elektrolyse",   (elektrolyse_p0[str(year)] - elektrolyse_p1[str(year)]).sum()),
+
+        ("Erdgas_Bus",    "DRI",                   Erdgas_in_DRI_p0[str(year)].sum()),
+        ("H2_Bus",        "DRI",                   H2_in_DRI_p0[str(year)].sum()),
+        ("H2_Bus",        "H2_Speicherverluste",   (elektrolyse_p1[str(year)].sum() - H2_in_DRI_p0[str(year)].sum())),
+
+        ("DRI",           "Stahl", DRI_p0[str(year)].sum()),
+        ("Lichtbogenofen","Stahl", DRI_p2[str(year)].sum()),
+        ("Hochofen",      "Stahl", generators_p[('Kohle', str(year))].sum()),
+    ]
+
+    # Negative/Null-Flüsse entfernen oder auf 0 setzen
+    links = [(s, t, float(v)) for (s, t, v) in links if v is not None and float(v) > 0]
+
+    # --- Plotly-Arrays ---
+    source = [idx[s] for (s, _, _) in links]
+    target = [idx[t] for (_, t, _) in links]
+    value  = [v for (_, _, v) in links]
+
+    # Link-Farben: an Zielknoten orientieren (robust über Mapping)
+    link_colors = [rgba(node_color_map.get(t, default_color), 0.45) for (_, t, _) in links]
+
+    fig = go.Figure(data=[go.Sankey(
+        arrangement="snap",
+        node=dict(
+            pad=18, thickness=20,
+            label=nodes,
+            color=node_colors,
+            line=dict(color="rgba(0,0,0,0.25)", width=1),
+        ),
+        link=dict(
+            source=source, target=target, value=value,
+            color=link_colors,
+            hovertemplate="%{source.label} → %{target.label}<br><b>%{value:,} (Einheit)</b><extra></extra>",
+        )
+    )])
+
+    fig.update_layout(
+        title=f"Energieflüsse {year}",
+        font=dict(size=14),
+        margin=dict(l=40, r=40, t=60, b=40),
+        plot_bgcolor="white",
+    )
+    fig.add_annotation(
+        text="*Einheiten konsistent halten (z. B. alles in MWh)",
+        xref="paper", yref="paper", x=0.0, y=-0.12, showarrow=False, font=dict(size=12)
+    )
+    import plotly.io as pio
+    pio.renderers.default = "browser"
+    fig.show()
+
+
+
+
+
 #%% Auslastung Anlagen
 
 auslastung_anlagen = pd.DataFrame(index = ["Wind_Onshore", "Wind_Offshore", "AEL"], columns = years)
+volllaststunden_anlagen = pd.DataFrame(index = ["PV_Sued", "PV_Ost_West", "Wind_Onshore", "Wind_Offshore", "AEL"], columns = years)
 
 for year in years:
+    
+    # Auslastung der Anlagen
     auslastung_anlagen.at["Wind_Onshore", year] = np.nan_to_num(generators_p[('Wind_Onshore', str(year))].mean() / df_generators.at["Wind_Onshore", str(year)], nan=0)
     auslastung_anlagen.at["Wind_Offshore", year] = np.nan_to_num(generators_p[('Wind_Offshore', str(year))].mean() / df_generators.at["Wind_Offshore", str(year)], nan=0)
-    auslastung_anlagen.at["AEL", year] = np.nan_to_num(elektrolyse_p0[str(year)].mean() / df_links.at["AEL", str(year)], nan=0)
+    auslastung_anlagen.at["AEL", year] = np.nan_to_num(elektrolyse_p1[str(year)].mean() / df_links.at["AEL", str(year)], nan=0)
     
+    # Volllaststunden der Anlagen
+    volllaststunden_anlagen.at["PV_Sued", year] = (np.nan_to_num(generators_p[('PV_Sued', str(year))].sum() / 
+                                                                 df_generators.at["PV_Sued", str(year)], nan=0))
+    volllaststunden_anlagen.at["PV_Ost_West", year] = (np.nan_to_num(generators_p[('PV_Ost_West', str(year))].sum() / 
+                                                                     df_generators.at["PV_Ost_West", str(year)], nan=0))
+    volllaststunden_anlagen.at["Wind_Onshore", year] = (np.nan_to_num(generators_p[('Wind_Onshore', str(year))].sum() / 
+                                                                      df_generators.at["Wind_Onshore", str(year)], nan=0))
+    volllaststunden_anlagen.at["Wind_Offshore", year] = (np.nan_to_num(generators_p[('Wind_Offshore', str(year))].sum() / 
+                                                                       df_generators.at["Wind_Offshore", str(year)], nan=0))
+    volllaststunden_anlagen.at["AEL", year] = (np.nan_to_num(elektrolyse_p1[str(year)].sum() / 
+                                                             df_links.at["AEL", str(year)], nan=0))
+    
+    # Stromerzeuger nach Jahr filtern
     mask = [
     ("Wind" in name or "PV" in name) and str(year) in str(j)
     for (name, j) in generators_p.columns
     ]
     
-    fig, ax1 = plt.subplots(figsize=(14, 8))
-    # Primärachse für Hochofen & DRI
-    (generators_p.loc[:, mask].sum(axis=1)).plot(ax=ax1, label="Stromerzeugung")
-    #DRI_p2[str(year)].plot(ax=ax1, label="Strom in Lichtbogenofen")
-    elektrolyse_p0[str(year)].plot(ax=ax1, label="Strom in AEL")
-    ax1.set_ylabel("Stahl [t]")
-    ax1.set_xlabel("Zeit")
-    ax1.grid(True, linestyle="--", alpha=0.5)
-    # Sekundärachse für Stahllager
-    ax2 = ax1.twinx()
-    #stahllager_e[p].plot(ax=ax2, label="Füllstand Stahllager", color="green", linestyle="dotted")
-    #ax2.set_ylabel("Füllstand Stahllager [t]")
-    # Legenden zusammenführen
-    lines_1, labels_1 = ax1.get_legend_handles_labels()
-    lines_2, labels_2 = ax2.get_legend_handles_labels()
-    ax1.legend(lines_1 + lines_2, labels_1 + labels_2, title="Link", loc="upper center", bbox_to_anchor=(0.5, -0.1), ncol=3, frameon=False)
-    # plotten
-    plt.title(f"Stromproduktion und -verbrauch; {year}")
+    # zeitliches Profil Stromerzeugung / Elektrolyse
+    # einzelnen Zeitraum betrachten mit [1:72]
+    fig, ax = plt.subplots(figsize=(14, 8))
+    # Stromerzeugung (Linie)
+    (generators_p.loc[:, mask][0:168].sum(axis=1)).plot(ax=ax, label="Stromerzeugung", color="darkorange", zorder=3)
+    # Elektrolyse (Linie + Fläche)
+    el = elektrolyse_p0[str(year)].iloc[0:168].fillna(0)
+    line = ax.plot(el.index, el.values, label="Strom in AEL", color="dodgerblue", zorder=3)[0]
+    ax.fill_between(el.index, 0, el.values, color=line.get_color(), alpha=0.35, label="_nolegend_", zorder=2)
+    # Achsenbeschriftung, Grid, Limits
+    ax.set_ylabel("Leistung [kW]")
+    ax.set_xlabel("Zeit [h]")
+    ax.set_ylim(bottom=0)
+    ax.grid(True, linestyle="--", alpha=0.5)
+    # Legende
+    ax.legend(title="Legende", loc="upper center", bbox_to_anchor=(0.5, -0.1), ncol=2, frameon=True)
+    # Titel & Layout
+    plt.title(f"Stromproduktion und -verbrauch in {year}")
     plt.tight_layout()
     plt.show()
     
     
+    # Jahresdauerlinie Erzeugung + p_nom Elektrolyse
+    fig, ax = plt.subplots(figsize=(14, 8))
+    # Erzeugung aufsummieren und sortieren
+    s_gen = generators_p.loc[:, mask].sum(axis=1).fillna(0)
+    s_sorted = s_gen.sort_values(ascending=False).reset_index(drop=True)
+    x = range(len(s_sorted))
+    # Linie + Fläche für Erzeugung
+    line = ax.plot(x, s_sorted.values, label="Erzeugung kumuliert", color="darkorange", zorder=2)[0]
+    ax.fill_between(x, 0, s_sorted.values, color=line.get_color(), alpha=0.30, label="_nolegend_", zorder=2)
+    # Elektrolyse-Nennleistungen als konstante Linie
+    el_p_nom = df_links.at["AEL", str(year)] / eff_links["AEL"]
+    ax.hlines(el_p_nom, xmin=0, xmax=len(s_sorted)-1, label="Installierte Elektrolyseleistung", color="dodgerblue", linestyles="-", linewidth=3)
+    ax.set_ylabel("Leistung [kW]")
+    ax.set_xlabel("Zeit [h/a]")
+    ax.set_ylim(bottom=0)
+    ax.set_xlim(0, len(s_sorted)-1)
+    #ax.grid(True, linestyle="--", alpha=0.5)
+    ax.legend(title="Legende", loc="upper right", frameon=True)
+    plt.title(f"Jahresdauerlinie in {year}")
+    plt.tight_layout()
+    plt.show()
+    
+    
+    fig, ax = plt.subplots(figsize=(14, 8))
+    # einzelnen Zeitraum betrachten mit [1:72]
+    gen_df = generators_p.loc[:, mask]
+    # Batterie mit positiv = Entladung
+    bat_entladen = batterie_p[str(year)].clip(lower=0)
+    bat_laden = (-batterie_p[str(year)]).clip(lower=0)
+    # gesamter df
+    stack_df = pd.concat([gen_df, bat_entladen, bat_laden], axis=1)
+    # stapeln
+    ax.stackplot(
+        stack_df[0:168].index,
+        *stack_df[0:168].T.values,
+        labels= ["PV_Sued", "PV_Ost_West", "Wind_Onshore", "Wind_Offshore", "Batterieentladung", "Batterieladung"], #stack_df.columns,
+        alpha=0.7,
+    )
+    # Last als Linie obendrauf
+    last = (elektrolyse_p0[str(year)] + DRI_p2[str(year)]).iloc[0:168]
+    ax.plot(last.index, last.values, label="Last", linewidth=2.5, zorder=5)
+    ax.set_ylim(bottom=0)
+    ax.set_ylabel("Energieerzeugung / Last (MW)")    # oder kW – passend zu deinen Daten
+    ax.set_xlabel("Zeit")
+    ax.legend(title="Legende", loc="upper center", bbox_to_anchor=(0.5, -0.1), ncol=2, frameon=True)
+    plt.title(f"Energieerzeugung, Batteriestatus und Elektrolyseur Last {year}")
+    plt.tight_layout()
+    plt.show()
+    
+    
+
 
 #%% Diagramm Emissionen
 fig, axs = plt.subplots(nrows=1, ncols=2, figsize=(15, 10))
@@ -584,8 +781,9 @@ plt.show()
 
 #%% Diagramm Links
 
-n_links = len(df_links)  # z. B. 5
-nrows, ncols = 2, 3
+n_links = len(df_links)
+ncols = 3
+nrows = math.ceil(n_links / ncols)
 fig, axs = plt.subplots(nrows=nrows, ncols=ncols, figsize=(15, 10))
 axs = axs.flatten()
 
@@ -594,8 +792,8 @@ df_links_subset = df_links.iloc[:len(axs)]
 df_links_subset.T.plot(subplots=True, ax=axs[:len(df_links_subset)])
 
 # Achsenbeschriftung und Titel setzen
-titles = ['AEL', 'H2 in DRI stofflich', 'Erdgas in DRI stofflich', 'DRI Stahlproduktion', 'Hochofen Stahlproduktion', '']
-ylabels = ['kg H2', 't Stahl aus H2', 't Stahl aus Erdgas', 't Stahl', 't Stahl', '']
+titles = df_links.index.tolist()
+ylabels = ['kW', 'kW', 'kg H2 aus AEL', 'kg H2', 'kg H2', 't Stahl aus H2', 't Stahl aus Erdgas', 'kW', 'H2 aus Kohle']
 
 for ax, title, ylabel in zip(axs, titles, ylabels):
     ax.set_title(title)
@@ -614,15 +812,15 @@ plt.show()
 fig, axs = plt.subplots(nrows=1, ncols=3, figsize=(15, 10))
 df_stores.T.plot(subplots=True, ax=axs)
 
-axs[0].set_ylabel('kg H2')
-axs[1].set_ylabel('t Stahl')
-axs[2].set_ylabel('kW')
+axs[0].set_ylabel('kWh')
+axs[1].set_ylabel('kg H2')
+axs[2].set_ylabel('t Stahl')
 
-axs[0].set_title('H2_Speicher')
-axs[1].set_title('Stahllager')
-axs[2].set_title('Batterie Entladeleistung (Kapa. wäre geteilt durch 4')
+axs[0].set_title('Batterie')
+axs[1].set_title('H2_Speicher')
+axs[2].set_title('Stahllager')
 
-fig.suptitle('Speicherauslegung')
+fig.suptitle('Speicherkapazität')
 fig.tight_layout()
 plt.show()
 
@@ -666,7 +864,7 @@ fig.suptitle("Vergleich Hochofen / DRI zeitlich", fontsize=16)
 fig.tight_layout(rect=[0, 0, 1, 0.96])  # Platz für suptitle
 plt.show()
 
-
+"""
 # einzelne Jahre
 for p in szenarien:
     fig, ax1 = plt.subplots(figsize=(14, 8))
@@ -688,7 +886,7 @@ for p in szenarien:
     plt.title(f"Zeitlicher Verlauf Output Hochofen & DRI und Füllstand Stahllager; {p}")
     plt.tight_layout()
     plt.show()
-
+"""
 """
 # einzelne Jahre gesamte Stahlproduktion
 for p in szenarien:
