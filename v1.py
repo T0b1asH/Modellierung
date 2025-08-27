@@ -66,7 +66,7 @@ DRI_baukosten = 518.46e6 + 172.5855e6 + 133.0714e6 # Invest. DRI + Rückbau Hoch
 
 
 # Hochofen
-HO_betriebskosten = 558.25 #€ wie setzten die sich zusammen?
+HO_betriebskosten = 77.47 # € / t Stahl
 HO_kohleverbauch_pro_t_Stahl = 1.6 # t_Kohle/t_Stahl
 
 
@@ -306,7 +306,7 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         marginal_cost=90,
         carrier="Kohle"
     )
-
+    
     network.add(
         "Link",
         name="Hochofen",
@@ -314,12 +314,12 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         bus1="Stahl",
         efficiency = 1 / HO_kohleverbauch_pro_t_Stahl, #1 / 1.6,  # 1t Stahl benötigt 1,6t Kohle; 750kg energetisch und 850kg stofflich
         p_nom_extendable=True,
-        p_nom_mod = ((df_stahl["Produzierte Stahlmenge [t/a]"].loc[2025] / 8760) * HO_kohleverbauch_pro_t_Stahl) / 5, # stündl. Stahlproduktion durch Effizienz durch Anz. Hochöfen (5)
+        p_nom_mod = ((df_stahl["Produzierte Stahlmenge [t/a]"].loc[2025] / 8760) * HO_kohleverbauch_pro_t_Stahl) / 4, # stündl. Stahlproduktion durch Effizienz durch Anz. Hochöfen (5)
         p_nom_max = (df_stahl["Produzierte Stahlmenge [t/a]"].loc[2025] / 8760) * HO_kohleverbauch_pro_t_Stahl,
         p_min_pu = 0.95,
         ramp_limit_up = 0.003,
         ramp_limit_down = 0.003,
-        marginal_cost = HO_betriebskosten * HO_kohleverbauch_pro_t_Stahl,
+        marginal_cost = HO_betriebskosten / HO_kohleverbauch_pro_t_Stahl,
     )
     
     
@@ -570,7 +570,7 @@ for year in years:
     ("Wind" in name or "PV" in name) and str(year) in str(j)
     for (name, j) in generators_p.columns
     ]
-    """
+    
     fig, ax1 = plt.subplots(figsize=(14, 8))
     # Primärachse für Hochofen & DRI
     (generators_p.loc[:, mask].sum(axis=1)).plot(ax=ax1, label="Stromerzeugung")
@@ -591,7 +591,7 @@ for year in years:
     plt.title(f"Stromproduktion und -verbrauch; {year}")
     plt.tight_layout()
     plt.show()
-    """
+    
     
 
 #%% Diagramm Emissionen
