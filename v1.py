@@ -10,67 +10,43 @@ import math
 # betrachtete Jahre
 years = [2025, 2030, 2035, 2040, 2045, 2050]
 
-# CO2-Emissionen
-"""
-co2_strommix = {  # Angaben in Gramm / kWh
-    2022: 433,  # historisch
-    2023: 386,
-    2024: 363,
-    2030: 261,  # Studie
-    2050: 0  # Annahme für das Modell
-}
-co2_strommix = pd.Series(co2_strommix)
-co2_strommix = co2_strommix.reindex(range(2022, 2051))
-co2_strommix = co2_strommix.interpolate(method="linear")  # Interpolation für fehlende Jahre
-"""
-
-co2_limits = { # in t
-    2025: 26097183999886e-6, # Startwert überlegen
+co2_limits = {
+    2025: 26097183999886e-6,
     2050: 0
 }
+
+annuitaet_10a = 0.1113                                              # 2% Zinssatz
+annuitaet_15a = 0.0778                                              # 2% Zinssatz
+annuitaet_20a = 0.0612                                              # 2% Zinssatz
+annuitaet_25a = 0.0512                                              # 2% Zinssatz
+annuitaet_30a = 0.0446                                              # 2% Zinssatz
+annuitaet_50a = 0.0318                                              # 2% Zinssatz
+
 co2_limits = pd.Series(co2_limits)
 co2_limits = co2_limits.reindex(range(2025, 2051))
-co2_limits = co2_limits.interpolate(method="linear")  # Interpolation für fehlende Jahre
+co2_limits = co2_limits.interpolate(method="linear")                # Interpolation für fehlende Jahre
 
-
-# Strompreisentwicklung
-"""
-strompreise = { # Angaben in €/kWh
-    2025 : 0.13,    # bekannt
-    2026 : 0.128,   # Prognosen
-    2031 : 0.076,
-    2050 : 0.059
-    }
-strompreise = pd.Series(strompreise)
-strompreise = strompreise.reindex(range(2025,2051))
-strompreise = strompreise.interpolate(method="linear") # Interpolation für fehlende Jahre
-
-netzbezug_capitalcost = 147.54 # €/kWa
-"""
-
-#stahlproduktion = 9_500_000/8760 #t in Format wie oben
 
 co2_ee = 0
-co2_kohle = 769230e-6 + 947690e-6 # Tonnen CO2 / Tonne Kohle; stofflich + energetisch
+co2_kohle = 769230e-6 + 947690e-6                                   # Tonnen CO2 / Tonne Kohle; stofflich + energetisch
 co2_gas = 202e-6
 
 # Heizwert Kohle
-heizwert_kohle = 4.17e3 # kWh/t
+heizwert_kohle = 4.17e3                                             # kWh/t
 
 # Direktreduktion
-DRI_wasserstoffverbrauch_pro_t_stahl_stofflich = 60  # kg H2 pro t Stahl
-DRI_wasserstoffverbrauch_pro_t_stahl_energetisch = 90  # kg H2 pro t Stahl
-DRI_stromverbrauch_pro_t_stahl = 650 # kWh/t Stahl im Lichtbogenofen
-DRI_baukosten = 518.46e6 + 172.5855e6 + 133.0714e6 # Invest. DRI + Rückbau Hochofen + Invest. Lichtbogenofen [Mio. €]
-#betriebskosten_DRI = 586 + 488 #DRI + Lichtbogenofen [€ / t Stahl] hiermit sind Kosten für Wartung, Instandhaltung usw. gemeint
+DRI_wasserstoffverbrauch_pro_t_stahl_stofflich = 60                 # kg H2 pro t Stahl
+DRI_wasserstoffverbrauch_pro_t_stahl_energetisch = 90               # kg H2 pro t Stahl
+DRI_stromverbrauch_pro_t_stahl = 650                                # kWh/t Stahl im Lichtbogenofen
+#DRI_Lichtbogen_baukosten = 518.46e6 + 172.5855e6 + 133.0714e6      # Invest. DRI + Rückbau Hochofen + Invest. Lichtbogenofen [Mio. €]
+DRI_Lichtbogen_baukosten = 2_185e6 + 172.6e6 + 1_605.5e6            # Invest. DRI + Rückbau Hochofen + Invest. Lichtbogenofen [Mio. €]
+DRI_Lichtbogen_betriebskosten = 11.19 + 27.54                       # DRI €/t Stahl ohne Ressourcen + Lichtbogenofen €/t Stahl
 
 
 # Hochofen
-HO_betriebskosten = 77.47 # € / t Stahl
-HO_kohleverbauch_pro_t_Stahl = 1.6 # t_Kohle/t_Stahl
+HO_betriebskosten = 77.47                                           # €/ t Stahl ohne Ressourcen
+HO_kohleverbauch_pro_t_Stahl = 1.6                                  # t Kohle/t Stahl
 
-
-#wasserstoffpreise = 151 #€/kg kann raus, oder?
 
 
 #%% Daten einlesen
@@ -78,27 +54,27 @@ HO_kohleverbauch_pro_t_Stahl = 1.6 # t_Kohle/t_Stahl
 def lade_daten(snapshots):
     
     # Dateipfad einlesen
-    dateipfad_code = os.path.dirname(os.path.realpath(__file__))  # Übergeordneter Ordner, in dem Codedatei liegt
-    ordner_input = os.path.join(dateipfad_code, 'Inputdaten')  # Unterordner "Inputdaten"
+    dateipfad_code = os.path.dirname(os.path.realpath(__file__))    # Übergeordneter Ordner, in dem Codedatei liegt
+    ordner_input = os.path.join(dateipfad_code, 'Inputdaten')       # Unterordner "Inputdaten"
 
     # Stahlproduktion
     df_stahl = pd.read_csv(os.path.join(ordner_input, "Stahlproduktion/Stahlproduktion.csv"), sep=";", decimal=",", index_col="Jahr")
 
     # PV-Erzeugung
     df_pv = pd.DataFrame(index = snapshots)
-    for name in ["sued", "ost", "west"]:  # Schleife, um alle 3 Profile einzulesen
+    for name in ["sued", "ost", "west"]:                            # Schleife, um alle 3 Profile einzulesen
         profil = pd.read_csv(
             os.path.join(ordner_input, f"PV/{name}.csv"), skiprows=3, usecols=["electricity"]).shift(1, fill_value=0).to_numpy()  # shift wegen Zeitverschiebung, 0 einsetzen
         df_pv[name] = profil
-    df_pv["ost/west"] = df_pv[["ost", "west"]].mean(axis=1)  # Mittelwert für Ost/West bilden
+    df_pv["ost/west"] = df_pv[["ost", "west"]].mean(axis=1)         # Mittelwert für Ost/West bilden
 
     # Wind-Erzeugung
     df_wind = pd.DataFrame(index = snapshots)
-    for name in ["Onshore", "Offshore"]:  # Schleife, um beide Profile einzulesen
+    for name in ["Onshore", "Offshore"]:                            # Schleife, um beide Profile einzulesen
         profil = pd.read_csv(
             os.path.join(ordner_input, f"Wind/{name}.csv"), skiprows=3, usecols=["electricity"])["electricity"]
         df_wind[name] = profil.shift(1, fill_value=profil.iloc[
-            -1]).to_numpy()  # shift wegen Zeitverschiebung, letzten Wert vorne einsetzen
+            -1]).to_numpy()                                         # shift wegen Zeitverschiebung, letzten Wert vorne einsetzen
 
     return df_stahl, df_pv, df_wind
 
@@ -113,36 +89,25 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
     network.add("Carrier", name="Kohle", co2_emissions=co2_kohle)
     network.add("Carrier", name="H2")
     network.add("Carrier", name="Erdgas", co2_emissions=co2_gas)
-    #network.add("Carrier", name="Stromnetz", co2_emissions=co2_strommix[year])
 
     # Busse
-    network.add("Bus", name="elektrisches Netz", carrier="Stromnetz")   # Einheit kWh
+    network.add("Bus", name="Strom")                                    # Einheit kWh
     network.add("Bus", name="Wasserstoff", carrier="H2")                # Einheit kg
     network.add("Bus", name="Erdgas", carrier="Erdgas")                 # Einheit kWh
     network.add("Bus", name="Stahl")                                    # Einheit t
     network.add("Bus", name="Kohle", carrier="Kohle")                   # Einheit t
     network.add("Bus", name="DRI")                                      # Einheit t Stahl
-    
-    """
-    # Netzbezug
-    network.add(
-        "Generator",
-        name="Netzbezug",
-        bus="elektrisches Netz",
-        p_nom_extendable=True,
-        capital_cost=netzbezug_capitalcost,
-        marginal_cost=strompreise[year],
-        carrier="Stromnetz"
-    )
-    """
+    network.add("Bus", name="Batterie_bus")                             # nur für Funktionalität
+    network.add("Bus", name="Salzkaverne_bus")                          # nur für Funktionalität
+
     # Erneuerbare
     network.add(
         "Generator",
         name="PV_Sued",
-        bus="elektrisches Netz",
+        bus="Strom",
         p_nom_extendable=True,
         p_max_pu=df_pv["sued"],
-        capital_cost=1100, #in Variable rein
+        capital_cost=1100 * annuitaet_20a,
         marginal_cost=0.008,
         carrier="EE"
     )
@@ -150,10 +115,10 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
     network.add(
         "Generator",
         name="PV_Ost_West",
-        bus="elektrisches Netz",
+        bus="Strom",
         p_nom_extendable=True,
         p_max_pu=df_pv["ost/west"],
-        capital_cost=1100,
+        capital_cost=1100 * annuitaet_20a,
         marginal_cost=0.008,
         carrier="EE"
     )
@@ -161,10 +126,10 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
     network.add(
         "Generator",
         name="Wind_Onshore",
-        bus="elektrisches Netz",
+        bus="Strom",
         p_nom_extendable=True,
         p_max_pu=df_wind["Onshore"],
-        capital_cost=1600,
+        capital_cost=1600 * annuitaet_20a,
         marginal_cost=0.0128,
         carrier="EE"
     )
@@ -172,67 +137,93 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
     network.add(
         "Generator",
         name="Wind_Offshore",
-        bus="elektrisches Netz",
+        bus="Strom",
         p_nom_extendable=True,
         p_max_pu=df_wind["Offshore"],
-        capital_cost=2800,
+        capital_cost=2800 * annuitaet_25a,
         marginal_cost=0.01775,
         carrier="EE"
     )
-    
+    # Simulation Batt bestehend aus einem Bus, einem Store und zwei Links
+    network.add(
+        "Store",
+        name="Batteriespeicher",
+        bus="Batterie_bus",
+        e_nom_extendable=True,
+        capital_cost=1000 * annuitaet_15a,
+        marginal_cost=0.45,
+        standing_loss = 0.000056
+    )
+    network.add(
+        "Link",
+        name="Batterie_ein",
+        bus0="Strom",
+        bus1="Batterie_bus",
+        p_nom_extendable=True,
+        efficiency=0.9826
+    )
+    network.add(
+        "Link",
+        name="Batterie_aus",
+        bus0="Batterie_bus",
+        bus1="Strom",
+        p_nom_extendable=True,
+        efficiency=0.9826
+    )
+    '''
     # Batteriespeicher
     network.add(
         "StorageUnit",
         name="Batteriespeicher",
-        bus="elektrisches Netz",
+        bus="Strom",
         p_nom_extendable=True,
-        #p_nom_max = 0.5e6,
-        marginal_cost=0.45,
         capital_cost=1000,
-        max_hours=4,  # Stunden bei voller Leistung -> bestimmt Kapazität
-        efficiency_store=0.97,
-        efficiency_dispatch=0.97,
+        marginal_cost=0.45,
+        max_hours=4,                                                                # Stunden bei voller Leistung -> bestimmt Kapazität
+        efficiency_store=0.9826,
+        efficiency_dispatch=0.9826,
         standing_loss=8.3335e-6  # 0,02%/Tag -> 0,0002/Tag/unit -> (1-x)^24 = 1 - 0,0002
     )
-
+    '''
     # Elektrolyse
     network.add(
         "Link",
         name="AEL",
-        bus0="elektrisches Netz",
+        bus0="Strom",
         bus1="Wasserstoff",
-        efficiency=0.7/33.33, # 70% Effizienz energiebezogen
+        efficiency=0.7/33.33,                                                       # 70% Effizienz energiebezogen
         p_nom_extendable=True,
         p_nom_min=2000,
-        capital_cost=1200,
+        capital_cost=1200 * annuitaet_30a,
         marginal_cost=1200 * 0.04
         )
-    
-    """
-    network.add(
-        "Link",
-        name="HTE",
-        bus0="elektrisches Netz",
-        bus1="Wasserstoff",
-        efficiency=0.9,
-        p_nom_extendable=True,
-        p_nom_min=9,
-        # p_nom_max = ,
-        capital_cost=1.3,  # nochmal prüfen
-        marginal_cost=1.3 * 0.12,
-    )  # Annahme, dass Wärme durch Hochofen / Lichtbogenofen bereitgestellt werden kann, daher immer verfügbar
-    """    
 
     # H2- Bus
     network.add(
         "Store",
         name="H2_Speicher",
-        bus="Wasserstoff",
+        bus="Salzkaverne_bus",
         e_nom_extendable=True,
-        e_initial=0,
-        capital_cost=9,
-        marginal_cost=0.45,
-        standing_loss=2.084e-5,  # 0,05%/Tag -> 0,0005/Tag/unit -> (1-x)^24 = 1 - 0,0005
+        capital_cost=9 * annuitaet_50a,
+        marginal_cost=0.45
+    )
+    network.add(
+        "Link",
+        name="Salzkaverne_ein",
+        bus0="Wasserstoff",
+        bus1="Salzkaverne_bus",
+        #p_nom_max = 30,
+        p_nom_extendable=True,
+        efficiency=0.98**0.5
+    )
+    network.add(
+        "Link",
+        name="Salzkaverne_aus",
+        bus0="Salzkaverne_bus",
+        bus1="Wasserstoff",
+        p_nom_extendable=True,
+        #p_nom_max = 30,
+        efficiency=0.98**0.5
     )
 
     network.add(
@@ -240,36 +231,18 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         name="H2_in_DRI",
         bus0="Wasserstoff",
         bus1="DRI",
-        #bus2 = "Wasserstoff",
         efficiency = 1 / (DRI_wasserstoffverbrauch_pro_t_stahl_stofflich + DRI_wasserstoffverbrauch_pro_t_stahl_energetisch),
         p_nom_extendable=True
     )
 
-    """
-    network.add(
-        "Link",
-        name="DRI",
-        bus0="Wasserstoff",
-        bus1="Stahl",
-        bus2 = "Wasserstoff",
-        bus3="elektrisches Netz",
-        efficiency0 = 1 / DRI_wasserstoffverbrauch_pro_t_stahl_stofflich,
-        efficiency2 = - (1 / DRI_wasserstoffverbrauch_pro_t_stahl_energetisch),
-        efficiency3 = - (DRI_stromverbrauch_pro_t_stahl * 1000),
-        p_nom_extendable=True,
-        #marginal_cost = betriebskosten_DRI,
-        capital_cost = DRI_baukosten
-    )
-    """
-    
     # Erdgas-Bus
     network.add(
         "Generator",
         name="Erdgas_Pipeline",
         bus="Erdgas",
         p_nom_extendable=True,
-        capital_cost=100, # geschätzt; Leistungspreis nachgucken
-        marginal_cost=0.08, # geschätzt; €/kWh 
+        capital_cost=100,                                                           # !!!ARSCHFICK!!! geschätzt; Leistungspreis nachgucken
+        marginal_cost=0.08,                                                         # geschätzt; €/kWh
         carrier="Erdgas"
     )
     
@@ -278,8 +251,7 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         name="Erdgas_in_DRI",
         bus0="Erdgas",
         bus1="DRI",
-        #bus2="Erdgas",
-        efficiency = 1 / (2777.77 + 3000), # Erdgas stofflich + energetisch
+        efficiency = 1 / (2777.77 + 3000),                                          # Erdgas stofflich + energetisch
         p_nom_extendable=True
     )
     
@@ -290,10 +262,11 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         name="Lichtbogenofen",
         bus0="DRI",
         bus1="Stahl",
-        bus2="elektrisches Netz",
+        bus2="Strom",
         efficiency2 = - DRI_stromverbrauch_pro_t_stahl,
         p_nom_extendable = True,
-        capital_cost = DRI_baukosten
+        capital_cost = DRI_Lichtbogen_baukosten * annuitaet_30a,
+        marginal_cost = DRI_Lichtbogen_betriebskosten
         )
     
     
@@ -312,7 +285,7 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         name="Hochofen",
         bus0="Kohle",
         bus1="Stahl",
-        efficiency = 1 / HO_kohleverbauch_pro_t_Stahl, #1 / 1.6,  # 1t Stahl benötigt 1,6t Kohle; 750kg energetisch und 850kg stofflich
+        efficiency = 1 / HO_kohleverbauch_pro_t_Stahl,                                                                #1 / 1.6,  # 1t Stahl benötigt 1,6t Kohle; 750kg energetisch und 850kg stofflich
         p_nom_extendable=True,
         p_nom_mod = ((df_stahl["Produzierte Stahlmenge [t/a]"].loc[2025] / 8760) * HO_kohleverbauch_pro_t_Stahl) / 4, # stündl. Stahlproduktion durch Effizienz durch Anz. Hochöfen (5)
         p_nom_max = (df_stahl["Produzierte Stahlmenge [t/a]"].loc[2025] / 8760) * HO_kohleverbauch_pro_t_Stahl,
@@ -360,52 +333,20 @@ def custom_constraint_rueckbau(network, snapshots):
     
     p_hochofen = model.variables['Link-p_nom']['Hochofen']
     eff_hochofen = network.links.at["Hochofen", "efficiency"]
-    p_dri = model.variables['Link-p_nom']['Lichtbogenofen'] # hier liegt schon t Stahl vor, deswegen keine Effizienz
+    p_dri = model.variables['Link-p_nom']['Lichtbogenofen']
     
     constraint_expression = (p_hochofen*eff_hochofen + p_dri <= 
                             df_stahl["Produzierte Stahlmenge [t/a]"].loc[year])
-    # Kapazität der Hochöfen muss immer kleiner gleich der Anfangs-Kapazität 
-    # minus der aktuellen Kapazität aller DRI sein
-    
+
     model.add_constraints(constraint_expression, name="Rückbau Hochofen")
-
-"""
-def custom_constraint_brenner(network, snapshots):
-    model = network.model
-    p = model.variables["Link-p"]
-
-    eff_h2 = network.links.at["H2_in_Brenner", "efficiency"]
-    eff_gas = network.links.at["Erdgas_in_Brenner", "efficiency"]
-    eff_dri = network.links.at["Lichtbogenofen", "efficiency0"]
-
-    for t in snapshots:
-        model.add_constraints(
-            p.at[t, "H2_in_Brenner"] * eff_h2 
-          + p.at[t, "Erdgas_in_Brenner"] * eff_gas 
-          - p.at[t, "Lichtbogenofen"] * eff_dri == 0,
-            name=f"brenner_energy_balance_{t}"
-        )
-
-
-def alle_custom_constraints(network, snapshots):
-    custom_constraint_rueckbau(network, snapshots)
-    custom_constraint_brenner(network, snapshots)
-"""
-
 #%% Schleife mit Simulationen und Einlesen der Ergebnisse
-
-"""
-standard_co2_emissions = round((network.generators_t.p.sum() / network.generators.efficiency *
-                                pd.merge(df_carrier, df_generators, left_index=True, right_on='carrier')[
-                                    'co2_emissions'])).sum()
-"""
 
 # Initialisierung der DataFrames
 df_emissionen = pd.DataFrame()
 df_generators = pd.DataFrame()
 df_links = pd.DataFrame()
 df_stores = pd.DataFrame()
-df_storage_units = pd.DataFrame()
+#df_storage_units = pd.DataFrame()
 hochofen_p1 = pd.DataFrame()
 DRI_p0 = pd.DataFrame()
 DRI_p1 = pd.DataFrame()
@@ -430,10 +371,10 @@ snapshots = pd.RangeIndex(8760)
 # Zeitreihen einlesen
 df_stahl, df_pv, df_wind = lade_daten(snapshots)
 
+network = erstelle_network(df_stahl, df_pv, df_wind, snapshots, year)
+
 # Schleife über Jahre
 for year in years:
-    
-    network = erstelle_network(df_stahl, df_pv, df_wind, snapshots, year)
 
     # CO₂-Limit setzen
     network.global_constraints.loc['co2-limit', 'constant'] = co2_limits[year]
@@ -460,15 +401,14 @@ for year in years:
         "CO2-Limit": co2_limits[year],
         "CO2-Emissionen": emissions_ges
     })
+
     # Effizienzen einlesen
     eff_links = network.links.efficiency.copy()
-    #special_links = ["H2_in_DRI", "Erdgas_in_DRI"]
-    #eff_links.loc[special_links] = network.links.loc[special_links, "efficiency0"] # efficiency0 für special_links
     df_links[col_name] = network.links.p_nom_opt * eff_links
     
     df_generators[col_name] = network.generators.p_nom_opt
     df_stores[col_name] = network.stores.e_nom_opt
-    df_storage_units[col_name] = network.storage_units.p_nom_opt
+    #df_storage_units[col_name] = network.storage_units.p_nom_opt
     
     
     # Zeitreihen auslesen
