@@ -339,6 +339,7 @@ def custom_constraint_rueckbau(network, snapshots):
                             df_stahl["Produzierte Stahlmenge [t/a]"].loc[year])
 
     model.add_constraints(constraint_expression, name="Rückbau Hochofen")
+
 #%% Schleife mit Simulationen und Einlesen der Ergebnisse
 
 # Initialisierung der DataFrames
@@ -371,11 +372,11 @@ snapshots = pd.RangeIndex(8760)
 # Zeitreihen einlesen
 df_stahl, df_pv, df_wind = lade_daten(snapshots)
 
-network = erstelle_network(df_stahl, df_pv, df_wind, snapshots, year)
-
 # Schleife über Jahre
 for year in years:
-
+    
+    network = erstelle_network(df_stahl, df_pv, df_wind, snapshots, year)
+    
     # CO₂-Limit setzen
     network.global_constraints.loc['co2-limit', 'constant'] = co2_limits[year]
     
@@ -418,9 +419,9 @@ for year in years:
     generators_p[('Gesamt', col_name)] = network.generators_t.p.sum(axis=1)
     
     # Batteriespeicher
-    batterie_ladung_p[col_name] = network.storage_units_t.p_store["Batteriespeicher"] # Ladung am Bus
-    batterie_entladung_p[col_name] = network.storage_units_t.p_dispatch["Batteriespeicher"] # Entladung am Bus
-    batterie_soc[col_name] = network.storage_units_t.state_of_charge["Batteriespeicher"] # SoC
+    #batterie_ladung_p[col_name] = network.storage_units_t.p_store["Batteriespeicher"] # Ladung am Bus
+    #batterie_entladung_p[col_name] = network.storage_units_t.p_dispatch["Batteriespeicher"] # Entladung am Bus
+    #batterie_soc[col_name] = network.storage_units_t.state_of_charge["Batteriespeicher"] # SoC
     
     # Elektrolyse
     elektrolyse_p0[col_name] = network.links_t.p0["AEL"] # Input Strom in AEL
@@ -454,7 +455,7 @@ for year in years:
     
 
 # Store- und StorageUnit-Ergebnisse kombinieren
-df_storage_combined = pd.concat([df_stores, df_storage_units])
+#df_storage_combined = pd.concat([df_stores, df_storage_units])
 
 
 #%% Energiebedarf
@@ -611,7 +612,7 @@ plt.show()
 
 #%% Diagramm Speicher
 fig, axs = plt.subplots(nrows=1, ncols=3, figsize=(15, 10))
-df_storage_combined.T.plot(subplots=True, ax=axs)
+df_stores.T.plot(subplots=True, ax=axs)
 
 axs[0].set_ylabel('kg H2')
 axs[1].set_ylabel('t Stahl')
