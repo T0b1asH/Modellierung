@@ -90,7 +90,6 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
     network.add("Carrier", name="Kohle", co2_emissions=co2_kohle)
     network.add("Carrier", name="H2")
     network.add("Carrier", name="Erdgas", co2_emissions=co2_gas)
-    #network.add("Carrier", name="Hochofen", co2_emissions=2/HO_kohleverbauch_pro_t_Stahl)
 
     # Busse
     network.add("Bus", name="Strom")                                    # Einheit kWh
@@ -109,8 +108,8 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         bus="Strom",
         p_nom_extendable=True,
         p_max_pu=df_pv["sued"],
-        capital_cost=628 * annuitaet_20a, 
-        marginal_cost=13.3, 
+        capital_cost=628 * annuitaet_20a,   # 1100
+        marginal_cost=13.3,                 # 0.008
         carrier="EE"
     )
 
@@ -120,8 +119,8 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         bus="Strom",
         p_nom_extendable=True,
         p_max_pu=df_pv["ost/west"],
-        capital_cost=628 * annuitaet_20a,
-        marginal_cost=13.3,
+        capital_cost=628 * annuitaet_20a,   # 1100
+        marginal_cost=13.3,                 # 0.008
         carrier="EE"
     )
 
@@ -132,7 +131,7 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         p_nom_extendable=True,
         p_max_pu=df_wind["Onshore"],
         capital_cost=1600 * annuitaet_25a,
-        marginal_cost=32, 
+        marginal_cost=32,                   # 0.0128
         carrier="EE"
     )
 
@@ -143,7 +142,7 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         p_nom_extendable=True,
         p_max_pu=df_wind["Offshore"],
         capital_cost=2800 * annuitaet_25a,
-        marginal_cost=39, 
+        marginal_cost=39,                   # 0.01775
         carrier="EE"
     )
     # Simulation Batt bestehend aus einem Bus, einem Store und zwei Links
@@ -152,8 +151,8 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         name="Batteriespeicher",
         bus="Batterie_bus",
         e_nom_extendable=True,
-        capital_cost=500 * annuitaet_15a, 
-        marginal_cost=6, 
+        capital_cost=500 * annuitaet_15a,   # 1000
+        marginal_cost=6,                    # 0.45 // werden standardmäßig auf Ein- und Ausspeicherung bezogen, vlt. halbieren?
         standing_loss = 0.000056
     )
     network.add(
@@ -298,8 +297,7 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         p_min_pu = 0.9,
         ramp_limit_up = 0.003,
         ramp_limit_down = 0.003,
-        marginal_cost = HO_betriebskosten / HO_kohleverbauch_pro_t_Stahl,
-        #carrier="Hochofen"
+        marginal_cost = HO_betriebskosten / HO_kohleverbauch_pro_t_Stahl
     )
     
     
@@ -349,20 +347,17 @@ def custom_constraint_rueckbau(network, snapshots):
 #%% Schleife mit Simulationen und Einlesen der Ergebnisse
 
 # Initialisierung der DataFrames
-df_objective = pd.DataFrame()
+df_objective = pd.DataFrame(index = ["Objective"])
 df_emissionen = pd.DataFrame()
 df_generators = pd.DataFrame()
 df_links = pd.DataFrame()
 df_stores = pd.DataFrame()
-#df_storage_units = pd.DataFrame()
 hochofen_p1 = pd.DataFrame()
 DRI_p0 = pd.DataFrame()
 DRI_p1 = pd.DataFrame()
 DRI_p2 = pd.DataFrame()
 stahllager_e = pd.DataFrame()
 generators_p = pd.DataFrame()
-#batterie_ladung_p = pd.DataFrame()
-#batterie_entladung_p = pd.DataFrame()
 batterie_soc = pd.DataFrame()
 batterie_p  = pd.DataFrame()
 elektrolyse_p0 = pd.DataFrame()
@@ -419,7 +414,7 @@ for year in years:
     eff_links = network.links.efficiency
     special_links = ["Lichtbogenofen"]
     eff_links.loc[special_links] = -network.links.loc[special_links, "efficiency2"] 
-    df_links[col_name] = network.links.p_nom_opt * eff_links # Output der Links
+    df_links[col_name] = network.links.p_nom_opt * eff_links # Output der Links, Lichtbogenofen Input
     
     df_generators[col_name] = network.generators.p_nom_opt
     df_stores[col_name] = network.stores.e_nom_opt
@@ -514,125 +509,63 @@ summen_ohne_kohle = ges_ohne_kohle_spalten.sum() # Summe berechnen
 print("\nEnergiebedarf ohne Kohle") # ausgeben
 for spalte, wert in summen_ohne_kohle.items():
     print(f"{spalte}: {round(wert/1e6)} GWh")
+    
 
 
-#%% Sankey-Diagramm
 
-import plotly.graph_objects as go
+coal_d, gas_d, h2_el_d, eaf_d = {}, {}, {}, {}
 
 for year in years:
-    # --- Knoten ---
-    nodes = [
-        "PV_Sued", "PV_Ost_West", "Wind_Onshore", "Wind_Offshore",
-        "Strom_Bus",
-        "Elektrolyse", "Lichtbogenofen", "Batterieverluste",
-        "Verluste Elektrolyse", "H2_Bus", "Erdgas_Bus",
-        "DRI", "H2_Speicherverluste", "Hochofen",
-        "Stahl"
-    ]
+    coal_d[year]  = float(hochofen_p1[str(year)].sum() * HO_kohleverbauch_pro_t_Stahl * heizwert_kohle)
+    gas_d[year]   = float(Erdgas_in_DRI_p0[str(year)].sum())
+    h2_el_d[year] = float(elektrolyse_p0[str(year)].sum())
+    eaf_d[year]   = float(DRI_p2[str(year)].sum())
 
-    # Farben als Mapping (Name -> Farbe); fehlende bekommen Default
-    node_color_map = {
-        "PV_Sued": "#FFD43B",
-        "PV_Ost_West": "#FFE680",
-        "Wind_Onshore": "#6AA5FF",
-        "Wind_Offshore": "#3B7DDD",
-        "Strom_Bus": "#0B6623",
-        "Elektrolyse": "#5DADE2",
-        "Lichtbogenofen": "#E74C3C",
-        "Batterieverluste": "#B56576",
-        "Verluste Elektrolyse": "#C0392B",
-        "H2_Bus": "#8E44AD",
-        "Erdgas_Bus": "#2E8B57",
-        "DRI": "#7FB3D5",
-        "H2_Speicherverluste": "#A569BD",
-        "Hochofen": "#795548",
-        "Stahl": "#7F8C8D",
-    }
-    default_color = "#CCCCCC"
-    node_colors = [node_color_map.get(n, default_color) for n in nodes]
+df = pd.concat({
+    "Kohle": pd.Series(coal_d),
+    "Erdgas": pd.Series(gas_d),
+    "H2-Produktion": pd.Series(h2_el_d),
+    "Lichtbogenofen": pd.Series(eaf_d),
+}, axis=1).sort_index()
 
-    # Hilfen
-    idx = {name: i for i, name in enumerate(nodes)}
-    def rgba(hex_color, alpha=0.4):
-        h = hex_color.lstrip("#")
-        r, g, b = [int(h[i:i+2], 16) for i in (0, 2, 4)]
-        return f"rgba({r},{g},{b},{alpha})"
 
-    # --- Daten (achte auf Einheiten-Konsistenz!) ---
-    # Batterie-"Verluste" hier als Rest (kann negativ sein -> clip unten)
-    batterieverluste = (
-        generators_p[('PV_Sued', str(year))].sum()
-        + generators_p[('PV_Ost_West', str(year))].sum()
-        + generators_p[('Wind_Onshore', str(year))].sum()
-        + generators_p[('Wind_Offshore', str(year))].sum()
-        - elektrolyse_p0[str(year)].sum()
-        - DRI_p2[str(year)].sum()
-    )
+farben = ["grey", "#FFD43B", "dodgerblue", "indianred"]  # Kohle, Erdgas, H2, EAF
+df_TWh = df / 1e9 # In TWh skalieren
+# Plot
+ax = df_TWh.plot(kind="bar", stacked=True, figsize=(12, 6), color=farben)
 
-    links = [
-        ("PV_Sued",       "Strom_Bus", generators_p[('PV_Sued', str(year))].sum()),
-        ("PV_Ost_West",   "Strom_Bus", generators_p[('PV_Ost_West', str(year))].sum()),
-        ("Wind_Onshore",  "Strom_Bus", generators_p[('Wind_Onshore', str(year))].sum()),
-        ("Wind_Offshore", "Strom_Bus", generators_p[('Wind_Offshore', str(year))].sum()),
+# Beschriftungen in die Segmente (df_TWh: Jahre x [Kohle,Erdgas,H2-Produktion,Lichtbogenofen])
+x = np.arange(len(df_TWh.index))          # Balkenpositionen (0..n-1)
+cum = np.zeros(len(df_TWh))               # kumulierte Höhe je Balken
 
-        ("Strom_Bus",     "Elektrolyse",      elektrolyse_p0[str(year)].sum()),
-        ("Strom_Bus",     "Lichtbogenofen",   DRI_p2[str(year)].sum()),
-        ("Strom_Bus",     "Batterieverluste", batterieverluste),
+# optional: sehr kleine Segmente auslassen (1% der y-Spanne)
+skip_thresh = 0.01 * ax.get_ylim()[1]
 
-        ("Elektrolyse",   "H2_Bus",                 elektrolyse_p1[str(year)].sum()),
-        ("Elektrolyse",   "Verluste Elektrolyse",   (elektrolyse_p0[str(year)] - elektrolyse_p1[str(year)]).sum()),
-
-        ("Erdgas_Bus",    "DRI",                   Erdgas_in_DRI_p0[str(year)].sum()),
-        ("H2_Bus",        "DRI",                   H2_in_DRI_p0[str(year)].sum()),
-        ("H2_Bus",        "H2_Speicherverluste",   (elektrolyse_p1[str(year)].sum() - H2_in_DRI_p0[str(year)].sum())),
-
-        ("DRI",           "Stahl", DRI_p0[str(year)].sum()),
-        ("Lichtbogenofen","Stahl", DRI_p2[str(year)].sum()),
-        ("Hochofen",      "Stahl", generators_p[('Kohle', str(year))].sum()),
-    ]
-
-    # Negative/Null-Flüsse entfernen oder auf 0 setzen
-    links = [(s, t, float(v)) for (s, t, v) in links if v is not None and float(v) > 0]
-
-    # --- Plotly-Arrays ---
-    source = [idx[s] for (s, _, _) in links]
-    target = [idx[t] for (_, t, _) in links]
-    value  = [v for (_, _, v) in links]
-
-    # Link-Farben: an Zielknoten orientieren (robust über Mapping)
-    link_colors = [rgba(node_color_map.get(t, default_color), 0.45) for (_, t, _) in links]
-
-    fig = go.Figure(data=[go.Sankey(
-        arrangement="snap",
-        node=dict(
-            pad=18, thickness=20,
-            label=nodes,
-            color=node_colors,
-            line=dict(color="rgba(0,0,0,0.25)", width=1),
-        ),
-        link=dict(
-            source=source, target=target, value=value,
-            color=link_colors,
-            hovertemplate="%{source.label} → %{target.label}<br><b>%{value:,} (Einheit)</b><extra></extra>",
+for comp in df_TWh.columns:               # Reihenfolge = Stapel-Reihenfolge
+    h = df_TWh[comp].values               # Segmenthöhen in TWh
+    centers = cum + h/2                   # Text-Mitte im Segment
+    for xi, hi, yc in zip(x, h, centers):
+        if hi <= 0 or hi < skip_thresh:
+            continue
+        ax.text(
+            xi, yc,
+            f"{hi:.1f}",                  # z.B. 12.3 (TWh)
+            ha="center", va="center",
+            fontsize=9, fontweight="bold", color="black"
         )
-    )])
+    cum += h
 
-    fig.update_layout(
-        title=f"Energieflüsse {year}",
-        font=dict(size=14),
-        margin=dict(l=40, r=40, t=60, b=40),
-        plot_bgcolor="white",
-    )
-    fig.add_annotation(
-        text="*Einheiten konsistent halten (z. B. alles in MWh)",
-        xref="paper", yref="paper", x=0.0, y=-0.12, showarrow=False, font=dict(size=12)
-    )
-    import plotly.io as pio
-    pio.renderers.default = "browser"
-    fig.show()
+ax.set_xlabel("Jahr")
+ax.set_ylabel("Energiebedarf [TWh]")
+ax.set_ylim(bottom=0)
+ax.set_xticklabels(df_TWh.index, rotation=0)
+ax.legend(title="Legende", loc="upper left", frameon=True)
+plt.title("Energiebedarf nach Energieträger")
+plt.tight_layout()
+plt.show()
 
 
+    
 
 
 
@@ -710,6 +643,8 @@ for year in years:
     plt.tight_layout()
     plt.show()
     
+    
+    # gestapelte Erzeugung und Last
     # ein Mal ohne Batterie ein Mal mit ausgeben
     fig, ax = plt.subplots(figsize=(14, 8))
     # einzelnen Zeitraum betrachten mit [1:72]
@@ -738,8 +673,10 @@ for year in years:
     plt.title(f"Energieerzeugung, Batteriestatus und Elektrolyseur Last {year}")
     plt.tight_layout()
     plt.show()
+ 
     
-# Anteil Kohle, Erdgas, H2 an Stahlproduktion
+#%% gestapeltes Diagramm Anteil Kohle, Erdgas, H2 an Stahlproduktion
+
 energietraeger_in_stahlproduktion = pd.DataFrame(columns=years, index=["Kohle", "Erdgas", "Wasserstoff"])
 for year in years:
     
@@ -764,7 +701,7 @@ df = df.clip(lower=0).fillna(0)
 x = df.columns.to_numpy(dtype=float)
 Y = df.to_numpy(dtype=float)   # shape: (n_series, n_x)
 fig, ax = plt.subplots(figsize=(10, 6))
-colors = ["grey", "indianred", "dodgerblue"]
+colors = ["grey", "#FFD43B", "dodgerblue"]
 ax.stackplot(
     x, *Y,
     labels=df.index.tolist(),
@@ -783,7 +720,7 @@ plt.tight_layout()
 plt.show()
    
 
-#%%
+#%% Balkendiagramm Zubau
 
 # Beispiel-Daten (wie bei dir oben)
 data_power = {
@@ -874,8 +811,7 @@ plt.tight_layout()
 plt.show()
 
 
-#%%
-import matplotlib.pyplot as plt
+#%% Liniendiagramm installierte Leistung EE
 
 # Generatoren auswählen
 gen_to_plot = ["PV_Sued", "PV_Ost_West", "Wind_Onshore", "Wind_Offshore"]
@@ -905,7 +841,92 @@ ax.legend(loc="upper left", frameon=True)
 plt.tight_layout()
 plt.show()
 
+#%% Liniendiagramm Kosten zur CO2-Reduktion
 
+
+# --- Daten vorbereiten ---
+# Kostenreihe (nur die Zeile "objective")
+costs = df_objective.loc["Objective"].astype(float)
+costs.index = costs.index.astype(int)  # Spaltennamen zu int (Jahre)
+costs = costs.sort_index()
+
+# Emissionenreihe (nur die Zeile "emissions")
+em = df_emissionen.loc["CO2-Emissionen"].astype(float)
+em.index = em.index.astype(int)
+em = em.sort_index()
+
+# y: Kosten relativ zu 2045
+y = 100 * costs / costs.loc[2045]
+
+# x: Reduktion gegenüber Startwert (z. B. 2025)
+baseline = em.loc[2025]   # oder dein gewünschtes Startjahr
+x = (baseline - em) / baseline * 100
+
+# Jahre, die beide haben
+years = sorted(set(x.index).intersection(y.index))
+
+# --- Plot ---
+fig, ax = plt.subplots(figsize=(9,6))
+ax.plot(x.loc[years], y.loc[years], marker="o", linewidth=2)
+
+ax.set_xlabel("CO₂-Reduktion [%]")
+ax.set_ylabel("Kosten (relativ zu 2045) [%]")
+ax.set_xlim(left=0)
+ax.set_ylim(bottom=0)
+ax.grid(True, linestyle="--", alpha=0.5)
+plt.title("Kosten zur CO₂-Reduktion")
+plt.tight_layout()
+plt.show()
+
+
+#%% Diagramm alle wichtigen Komponenten in einem / Übersicht
+
+
+gen_selection = ["PV_Sued", "PV_Ost_West", "Wind_Onshore", "Wind_Offshore"]
+df_generators_sel = df_generators.loc[gen_selection]
+
+batt_selection = ["Batteriespeicher"]
+df_batt_sel = df_stores.loc[batt_selection]
+
+link_selection = ["Hochofen", "AEL", "H2_in_DRI", "Erdgas_in_DRI", "Lichtbogenofen"]
+df_link_sel = df_links.loc[link_selection]
+
+store_selection = ["H2_Speicher"]
+df_stores_sel = df_stores.loc[store_selection]
+
+df_sel = pd.concat([df_generators_sel, df_batt_sel, df_link_sel, df_stores_sel], axis=0)
+df_sel.loc["AEL"] = df_sel.loc["AEL"] / eff_links.loc["AEL"]
+
+
+
+# Anzahl Komponenten
+n_components = len(df_sel)
+ncols = 4
+nrows = math.ceil(n_components / ncols)
+
+# Subplots erzeugen
+fig, axs = plt.subplots(nrows=nrows, ncols=ncols, figsize=(15, 5 * nrows))
+axs = axs.flatten()
+
+df_sel_subset = df_sel.iloc[:len(axs)]
+df_sel_subset.T.plot(subplots=True, ax=axs[:n_components])
+
+# Titel und y-Labels definieren (dynamisch oder manuell)
+titles = df_sel.index.tolist()  # oder manuell wie vorher
+ylabels = ['kW'] * (n_components - 7) + ['kWh'] + ['Output t Stahl'] + ['kW el.'] + ['Output t Stahl'] + ['Output t Stahl'] + ['kW'] + ["kg H2"] # Beispiel: letzter ist in Tonnen
+
+# Beschriftung setzen
+for i in range(n_components):
+    axs[i].set_title(titles[i])
+    axs[i].set_ylabel(ylabels[i] if i < len(ylabels) else '')
+
+# Überzählige Achsen deaktivieren
+for j in range(n_components, len(axs)):
+    axs[j].axis("off")
+
+fig.suptitle("Generatoren")
+fig.tight_layout()
+plt.show()
 
 #%% Diagramm Emissionen
 fig, axs = plt.subplots(nrows=1, ncols=2, figsize=(15, 10))
