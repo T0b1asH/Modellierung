@@ -108,6 +108,7 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         bus="Strom",
         p_nom_extendable=True,
         p_max_pu=df_pv["sued"],
+        p_min_pu=df_pv["sued"] * 0.9,
         capital_cost=628 * annuitaet_20a,   # 1100
         marginal_cost=13.3,                 # 0.008
         carrier="EE"
@@ -119,6 +120,7 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         bus="Strom",
         p_nom_extendable=True,
         p_max_pu=df_pv["ost/west"],
+        p_min_pu=df_pv["ost/west"] * 0.9,
         capital_cost=628 * annuitaet_20a,   # 1100
         marginal_cost=13.3,                 # 0.008
         carrier="EE"
@@ -130,6 +132,7 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         bus="Strom",
         p_nom_extendable=True,
         p_max_pu=df_wind["Onshore"],
+        p_min_pu=df_wind["Onshore"] * 0.9,
         capital_cost=1600 * annuitaet_25a,
         marginal_cost=32,                   # 0.0128
         carrier="EE"
@@ -141,6 +144,7 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         bus="Strom",
         p_nom_extendable=True,
         p_max_pu=df_wind["Offshore"],
+        p_min_pu=df_wind["Offshore"] * 0.9,
         capital_cost=2800 * annuitaet_25a,
         marginal_cost=39,                   # 0.01775
         carrier="EE"
@@ -152,7 +156,7 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         bus="Batterie_bus",
         e_nom_extendable=True,
         capital_cost=500 * annuitaet_15a,   # 1000
-        marginal_cost=6,                    # 0.45 // werden standardmäßig auf Ein- und Ausspeicherung bezogen, vlt. halbieren?
+        marginal_cost=3, # 6/2                    # 0.45 // werden standardmäßig auf Ein- und Ausspeicherung bezogen, vlt. halbieren?
         standing_loss = 0.000056
     )
     network.add(
@@ -213,7 +217,7 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         name="Salzkaverne_ein",
         bus0="Wasserstoff",
         bus1="Salzkaverne_bus",
-        p_nom_max = 10_000, # https://www.icis.com/explore/resources/news/2023/05/09/10883508/hydrogen-storage-open-season-announced-by-gasunie/
+        #p_nom_max = 10_000, # https://www.icis.com/explore/resources/news/2023/05/09/10883508/hydrogen-storage-open-season-announced-by-gasunie/
         p_nom_extendable=True,
         efficiency=0.915**0.5 # https://www.irena.org/-/media/Files/IRENA/Agency/Publication/2020/Dec/IRENA_Green_hydrogen_cost_2020.pdf
     )
@@ -223,7 +227,7 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         bus0="Salzkaverne_bus",
         bus1="Wasserstoff",
         p_nom_extendable=True,
-        p_nom_max = 52_000, # https://www.icis.com/explore/resources/news/2023/05/09/10883508/hydrogen-storage-open-season-announced-by-gasunie/
+        #p_nom_max = 52_000, # https://www.icis.com/explore/resources/news/2023/05/09/10883508/hydrogen-storage-open-season-announced-by-gasunie/
         efficiency=0.915**0.5
     )
 
