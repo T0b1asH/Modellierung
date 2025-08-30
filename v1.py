@@ -20,6 +20,29 @@ co2_limits = co2_limits.reindex(range(2025, 2046))
 co2_limits = co2_limits.interpolate(method="linear")                # Interpolation für fehlende Jahre
 
 
+co2_strommix = {  # Angaben in Gramm / kWh
+    2022: 433,  # historisch
+    2023: 386,
+    2024: 363,
+    2030: 261,  # Studie
+    2050: 0  # Annahme für das Modell
+}
+co2_strommix = pd.Series(co2_strommix)
+co2_strommix = co2_strommix.reindex(range(2022, 2051))
+co2_strommix = co2_strommix.interpolate(method="linear")  # Interpolation für fehlende Jahre
+
+strompreise = { # Angaben in €/kWh
+    2025 : 0.13,    # bekannt
+    2026 : 0.128,   # Prognosen
+    2031 : 0.076,
+    2050 : 0.059
+    }
+strompreise = pd.Series(strompreise)
+strompreise = strompreise.reindex(range(2025,2051))
+strompreise = strompreise.interpolate(method="linear") # Interpolation für fehlende Jahre
+
+netzbezug_capitalcost = 147.54 # €/kWa
+
 co2_ee = 0
 co2_kohle = 2.56 #769230e-6 + 947690e-6                                   # Tonnen CO2 / Tonne Kohle; stofflich + energetisch
 co2_gas = 202e-6
@@ -81,7 +104,7 @@ def lade_daten(snapshots):
 
 #%% Netzwerkdefinition
 
-def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
+def erstelle_network(df_stahl, df_pv, df_wind, co2_strommix, snapshots, year):
     network = pypsa.Network()
     network.set_snapshots(snapshots)
 
@@ -90,6 +113,7 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
     network.add("Carrier", name="Kohle", co2_emissions=co2_kohle)
     network.add("Carrier", name="H2")
     network.add("Carrier", name="Erdgas", co2_emissions=co2_gas)
+    network.add("Carrier", name="Stromnetz", co2_emissions=co2_strommix[year])
 
     # Busse
     network.add("Bus", name="Strom")                                    # Einheit kWh
@@ -100,7 +124,30 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
     network.add("Bus", name="DRI")                                      # Einheit t Stahl
     network.add("Bus", name="Batterie_bus")                             # nur für Funktionalität
     network.add("Bus", name="Salzkaverne_bus")                          # nur für Funktionalität
-
+    
+    """
+    # Netzbezug
+    network.add(
+        "Generator",
+        name="Netzbezug",
+        bus="Strom",
+        p_nom_extendable=True,
+        p_nom_max = 500_000,
+        capital_cost=netzbezug_capitalcost,
+        marginal_cost=strompreise[year],
+        carrier="Stromnetz"
+    )
+    """
+    """
+    network.add(
+        "Generator",
+        name="Netzeinspeisung",
+        bus="Strom",
+        p_nom_extendable=True,
+        sign=-1
+        )
+    """
+    
     # Erneuerbare
     network.add(
         "Generator",
@@ -108,9 +155,9 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         bus="Strom",
         p_nom_extendable=True,
         p_max_pu=df_pv["sued"],
-        p_min_pu=df_pv["sued"] * 0.9,
-        capital_cost=628 * annuitaet_20a,   # 1100
-        marginal_cost=13.3,                 # 0.008
+        #p_min_pu=df_pv["sued"] * 0.9,
+        capital_cost=1100 * annuitaet_20a,   # 628
+        marginal_cost=0.008,                 # 13.3
         carrier="EE"
     )
 
@@ -120,9 +167,9 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         bus="Strom",
         p_nom_extendable=True,
         p_max_pu=df_pv["ost/west"],
-        p_min_pu=df_pv["ost/west"] * 0.9,
-        capital_cost=628 * annuitaet_20a,   # 1100
-        marginal_cost=13.3,                 # 0.008
+        #p_min_pu=df_pv["ost/west"] * 0.9,
+        capital_cost=1100 * annuitaet_20a,   # 628
+        marginal_cost=0.008,                 # 13.3
         carrier="EE"
     )
 
@@ -132,9 +179,9 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         bus="Strom",
         p_nom_extendable=True,
         p_max_pu=df_wind["Onshore"],
-        p_min_pu=df_wind["Onshore"] * 0.9,
+        #p_min_pu=df_wind["Onshore"] * 0.9,
         capital_cost=1600 * annuitaet_25a,
-        marginal_cost=32,                   # 0.0128
+        marginal_cost=0.0128,                   # 32
         carrier="EE"
     )
 
@@ -144,9 +191,9 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         bus="Strom",
         p_nom_extendable=True,
         p_max_pu=df_wind["Offshore"],
-        p_min_pu=df_wind["Offshore"] * 0.9,
+        #p_min_pu=df_wind["Offshore"] * 0.9,
         capital_cost=2800 * annuitaet_25a,
-        marginal_cost=39,                   # 0.01775
+        marginal_cost=0.01775,                   # 39
         carrier="EE"
     )
     # Simulation Batt bestehend aus einem Bus, einem Store und zwei Links
@@ -155,8 +202,8 @@ def erstelle_network(df_stahl, df_pv, df_wind, snapshots, year):
         name="Batteriespeicher",
         bus="Batterie_bus",
         e_nom_extendable=True,
-        capital_cost=500 * annuitaet_15a,   # 1000
-        marginal_cost=3, # 6/2                    # 0.45 // werden standardmäßig auf Ein- und Ausspeicherung bezogen, vlt. halbieren?
+        capital_cost=1000 * annuitaet_15a,   # 500
+        marginal_cost=0.45, # 6/2                    # werden standardmäßig auf Ein- und Ausspeicherung bezogen, vlt. halbieren?
         standing_loss = 0.000056
     )
     network.add(
@@ -384,7 +431,7 @@ for year in years:
     
     print(f"Ich bin in Jahr {year}")
     
-    network = erstelle_network(df_stahl, df_pv, df_wind, snapshots, year)
+    network = erstelle_network(df_stahl, df_pv, df_wind, co2_strommix, snapshots, year)
     
     # CO₂-Limit setzen
     network.global_constraints.loc['co2-limit', 'constant'] = co2_limits[year]
@@ -678,6 +725,9 @@ for year in years:
     plt.tight_layout()
     plt.show()
  
+
+print(auslastung_anlagen)
+print("\n", volllaststunden_anlagen)
     
 #%% gestapeltes Diagramm Anteil Kohle, Erdgas, H2 an Stahlproduktion
 
@@ -745,6 +795,12 @@ df_power = pd.DataFrame(data_power, index=scenarios).T
 df_energy = pd.DataFrame(data_energy, index=scenarios).T
 
 
+"""
+ax1.set_ylim(0, max(base+zubau) * 1.15)
+ax2.set_ylim(0, max(base_e+zubau_e) * 1.15)
+
+plt.tight_layout(rect=[0,0,1,0.95])  # oben Platz lassen
+"""
 
 # --- Plot ---
 fig, ax1 = plt.subplots(figsize=(13,9))
