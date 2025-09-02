@@ -4,6 +4,7 @@ import pandas as pd
 import os
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mtick
+import matplotlib.dates as mdates
 import math
 
 #%% Variablen einlesen
@@ -315,7 +316,8 @@ def erstelle_network(df_stahl, df_pv, df_wind, co2_strommix, snapshots, year):
         bus0="DRI",
         bus1="Stahl",
         bus2="Strom",
-        efficiency2 = - DRI_stromverbrauch_pro_t_stahl,
+        efficiency2 = - DRI_stromverbrauch_pro_t_stahl, #suppose a link representing a methanation process takes as inputs one unit of hydrogen and 0.5 units of carbon dioxide
+                                                        #Then bus0 connects to hydrogen, bus1 connects to carbon dioxide with efficiency=-0.5 (since 0.5 units of carbon dioxide is taken for each unit of hydrogen)
         p_nom_extendable = True,
         #p_nom_mod = 2_500_000,
         p_min_pu = 0.9,
@@ -394,6 +396,7 @@ def custom_constraint_rueckbau(network, snapshots):
                             df_stahl["Produzierte Stahlmenge [t/a]"].loc[year])
 
     model.add_constraints(constraint_expression, name="Rückbau Hochofen")
+
 
 #%% Schleife mit Simulationen und Einlesen der Ergebnisse
 
@@ -672,27 +675,98 @@ for year in years:
     plt.show()
     
     
-    # Jahresdauerlinie Erzeugung + p_nom Elektrolyse
+    
+    
+    bat_entladen = batterie_p[str(year)].clip(lower=0)
+    bat_laden = batterie_p[str(year)].clip(upper=0)
+    
+    # Jahresdauerlinie Erzeugung + Elektrolyse
     fig, ax = plt.subplots(figsize=(14, 8))
-    # Erzeugung aufsummieren und sortieren
-    s_gen = generators_p.loc[:, mask].sum(axis=1).fillna(0)
-    s_sorted = s_gen.sort_values(ascending=False).reset_index(drop=True)
-    x = range(len(s_sorted))
-    # Linie + Fläche für Erzeugung
-    line = ax.plot(x, s_sorted.values, label="Erzeugung kumuliert", color="darkorange", zorder=2)[0]
-    ax.fill_between(x, 0, s_sorted.values, color=line.get_color(), alpha=0.30, label="_nolegend_", zorder=2)
-    # Elektrolyse-Nennleistungen als konstante Linie
-    el_p_nom = df_links.at["AEL", str(year)] / eff_links["AEL"]
-    ax.hlines(el_p_nom, xmin=0, xmax=len(s_sorted)-1, label="Installierte Elektrolyseleistung", color="dodgerblue", linestyles="-", linewidth=3)
-    ax.set_ylabel("Leistung [kW]")
+    
+    # 1) Erzeugung aufsummieren und sortieren
+    s_gen = (generators_p.loc[:, mask].sum(axis=1).fillna(0) + bat_laden + bat_entladen) / 1e6   # in GW
+    gen_sorted = s_gen.sort_values(ascending=False).reset_index(drop=True)
+    
+    # 2) Elektrolyse-Zeitreihe ebenfalls sortieren
+    el = elektrolyse_p0[str(year)].fillna(0) / 1e6   # in GW
+    el_sorted = el.sort_values(ascending=False).reset_index(drop=True)
+    
+    # 3) Auf gleiche Länge bringen
+    n = min(len(gen_sorted), len(el_sorted))
+    x = range(n)
+    
+    # 4) Erzeugung (Fläche + Linie)
+    line_gen = ax.plot(x, gen_sorted.iloc[:n].values, label="Erzeugung (JDL)",
+                       color="darkorange", zorder=2)[0]
+    ax.fill_between(x, 0, gen_sorted.iloc[:n].values,
+                    color=line_gen.get_color(), alpha=0.30, label="_nolegend_", zorder=1)
+    
+    # 5) Elektrolyse (Linie)
+    line_el = ax.plot(x, el_sorted.iloc[:n].values, label="Elektrolyse (JDL)",
+                      color="dodgerblue", linewidth=2.5, zorder=3)[0]
+    
+    # 6) Installierte Elektrolyseleistung als konstante Linie
+    el_p_nom = (df_links.at["AEL", str(year)] / eff_links["AEL"]) / 1e6   # in GW
+    ax.hlines(el_p_nom, 0, n-1, color="steelblue", linestyle=":", linewidth=2,
+              label="Installierte Elektrolyseleistung")
+    
+    # 7) Achsen & Layout
+    ax.set_ylabel("Leistung [GW]")
     ax.set_xlabel("Zeit [h/a]")
     ax.set_ylim(bottom=0)
-    ax.set_xlim(0, len(s_sorted)-1)
-    #ax.grid(True, linestyle="--", alpha=0.5)
+    ax.set_xlim(0, n-1)
+    ax.grid(True, linestyle="--", alpha=0.5)
+    
     ax.legend(title="Legende", loc="upper right", frameon=True)
     plt.title(f"Jahresdauerlinie in {year}")
     plt.tight_layout()
     plt.show()
+
+    
+    
+    # Jahresdauerlinie Erzeugung + Elektrolyse
+    fig, ax = plt.subplots(figsize=(14, 8))
+    
+    # 1) Erzeugung aufsummieren und für die Jahresdauerlinie sortieren (absteigend)
+    s_gen = generators_p.loc[:, mask].sum(axis=1).fillna(0)
+    gen_sorted = s_gen.sort_values(ascending=False).reset_index(drop=True)
+    
+    # 2) Elektrolyse-Zeitreihe holen und ebenfalls sortieren (absteigend)
+    el = elektrolyse_p0[str(year)].fillna(0)        # passe den Namen ggf. an
+    el_sorted = el.sort_values(ascending=False).reset_index(drop=True)
+    
+    # 3) Auf gleiche Länge bringen (falls verschieden viele Snapshots)
+    n = min(len(gen_sorted), len(el_sorted))
+    x = range(n)
+    
+    # 4) Plotten: Erzeugung (Fläche + Linie)
+    line_gen = ax.plot(x, gen_sorted.iloc[:n].values, label="Erzeugung (JDL)",
+                       color="darkorange", zorder=2)[0]
+    ax.fill_between(x, 0, gen_sorted.iloc[:n].values,
+                    color=line_gen.get_color(), alpha=0.30, label="_nolegend_", zorder=1)
+    
+    # 5) Plotten: Elektrolyse (Linie + optionale Fläche)
+    line_el = ax.plot(x, el_sorted.iloc[:n].values, label="Elektrolyse (JDL)",
+                      color="dodgerblue", linewidth=2.5, zorder=3)[0]
+    # Wenn du auch die Fläche möchtest, nimm die nächste Zeile raus aus dem Kommentar:
+    # ax.fill_between(x, 0, el_sorted.iloc[:n].values, color=line_el.get_color(), alpha=0.2, zorder=2)
+    
+    ax.hlines(el_p_nom, 0, n-1, color="steelblue", linestyle=":", linewidth=2,
+          label="Installierte Elektrolyseleistung")
+
+    
+    # 6) Achsen & Layout
+    ax.set_ylabel("Leistung [kW]")
+    ax.set_xlabel("Zeit [h/a]")
+    ax.set_ylim(bottom=0)
+    ax.set_xlim(0, n-1)
+    ax.grid(True, linestyle="--", alpha=0.5)
+    
+    ax.legend(title="Legende", loc="upper right", frameon=True)
+    plt.title(f"Jahresdauerlinie in {year}")
+    plt.tight_layout()
+    plt.show()
+
     
     
     # gestapelte Erzeugung und Last
@@ -720,6 +794,42 @@ for year in years:
     ax.set_ylim(bottom=0)
     ax.set_ylabel("Energieerzeugung / Last (MW)")    # oder kW – passend zu deinen Daten
     ax.set_xlabel("Zeit")
+    ax.legend(title="Legende", loc="upper center", bbox_to_anchor=(0.5, -0.1), ncol=2, frameon=True)
+    plt.title(f"Energieerzeugung, Batteriestatus und Elektrolyseur Last {year}")
+    plt.tight_layout()
+    plt.show()
+    
+    
+    
+    # gestapelte Erzeugung und Last
+    # ein Mal ohne Batterie ein Mal mit ausgeben
+    fig, ax = plt.subplots(figsize=(14, 8))
+    # einzelnen Zeitraum betrachten mit [1:72]
+    gen_df = generators_p.loc[:, mask]
+    # Batterie mit positiv = Entladung
+    bat_entladen = batterie_p[str(year)].clip(lower=0)
+    bat_laden = batterie_p[str(year)].clip(upper=0)
+    # gesamter df
+    stack_df = pd.concat([gen_df, bat_entladen, bat_laden], axis=1)
+    #stack_df = pd.concat([gen_df, bat_entladen], axis=1)
+    # stapeln
+    ax.stackplot(
+        stack_df[3500:3800].index,
+        *stack_df[3500:3800].T.values,
+        #labels = stack_df.columns.tolist(),
+        labels= ["PV_Sued", "PV_Ost_West", "Wind_Onshore", "Wind_Offshore", "Batterieentladung", "Batterieladung"], #stack_df.columns,
+        alpha=0.7,
+    )
+    # Last als Linie obendrauf
+    last = (elektrolyse_p0[str(year)] + DRI_p2[str(year)]).iloc[3500:3800]
+    ax.plot(last.index, last.values, label="Last", linewidth=2.5, zorder=5)
+    ax.set_ylim(bottom=0)
+    ax.set_ylabel("Energieerzeugung / Last (MW)")    # oder kW – passend zu deinen Daten
+    # x-Achse formatieren: nur Tag und Monat
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%d-%m'))
+    # optional: Abstand der Ticks anpassen
+    ax.xaxis.set_major_locator(mdates.AutoDateLocator())
+    ax.set_xlabel("Datum")
     ax.legend(title="Legende", loc="upper center", bbox_to_anchor=(0.5, -0.1), ncol=2, frameon=True)
     plt.title(f"Energieerzeugung, Batteriestatus und Elektrolyseur Last {year}")
     plt.tight_layout()
@@ -780,7 +890,7 @@ plt.show()
 data_power = {
     "PV":               [98.2e6, 98.2e6 + df_generators.at["PV_Sued", "2045"] + df_generators.at["PV_Ost_West", "2045"]],
     "Wind Onshore":     [63.3e6, 63.3e6 + df_generators.at["Wind_Onshore", "2045"]],
-    "Wind Offshore":    [9.22e6, 9.22e6 + df_generators.at["Wind_Onshore", "2045"]],
+    "Wind Offshore":    [9.22e6, 9.22e6 + df_generators.at["Wind_Offshore", "2045"]],
     "Elektrolyse":      [0.11e6, 0.11e6 + (df_links.at["AEL", "2045"] / eff_links["AEL"])],
 }
 
@@ -877,22 +987,30 @@ plt.show()
 gen_to_plot = ["PV_Sued", "PV_Ost_West", "Wind_Onshore", "Wind_Offshore"]
 
 # Daten in MW
-df_plot = df_generators.loc[gen_to_plot].div(1e3)
+df_plot = df_generators.loc[gen_to_plot].div(1e6)
 
 # Summe über die 4 Generatoren
 df_plot.loc["Summe Erneuerbare"] = df_plot.sum(axis=0)
+
+gen_colors = {
+    "PV_Sued": "gold",
+    "PV_Ost_West": "orange",
+    "Wind_Onshore": "lightgreen",
+    "Wind_Offshore": "darkgreen",
+    "Summe Erneuerbare": "black"
+}
 
 # Plot
 fig, ax = plt.subplots(figsize=(10,6))
 
 for gen in gen_to_plot:
-    ax.plot(df_plot.columns, df_plot.loc[gen], marker="o", label=gen)
+    ax.plot(df_plot.columns, df_plot.loc[gen], marker="o", label=gen, color=gen_colors[gen])
 
 # Summe extra hervorheben
 ax.plot(df_plot.columns, df_plot.loc["Summe Erneuerbare"],
         marker="o", linestyle="--", linewidth=2.5, color="black", label="Summe Erneuerbare")
 
-ax.set_ylabel("Installierte Leistung [MW]")
+ax.set_ylabel("Installierte Leistung [GW]")
 ax.set_xlabel("Jahr")
 ax.set_title("Installierte Kapazität nach Technologie")
 ax.grid(True, linestyle="--", alpha=0.6)
@@ -901,8 +1019,47 @@ ax.legend(loc="upper left", frameon=True)
 plt.tight_layout()
 plt.show()
 
-#%% Liniendiagramm Kosten zur CO2-Reduktion
 
+
+
+
+# Generatoren auswählen
+stores_to_plot = ["Batteriespeicher", "H2_Speicher"]
+
+# Daten in MW
+df_stores_plot = df_stores.loc[stores_to_plot].div(1e6)
+
+store_colors = {
+    "Batteriespeicher": "forestgreen",
+    "H2_Speicher": "dodgerblue"
+}
+
+store_labels = {
+    "Batteriespeicher": "Batteriespeicher",
+    "H2_Speicher": "Salzkaverne"
+    }
+
+for year in years:
+    df_stores_plot.at["H2_Speicher", str(year)] = df_stores_plot.at["H2_Speicher", str(year)] * 33.33
+
+# Plot
+fig, ax = plt.subplots(figsize=(10,6))
+
+for store in stores_to_plot:
+    ax.plot(df_stores_plot.columns, df_stores_plot.loc[store],
+             marker="o", label=store_labels[store], color=store_colors[store])
+
+ax.set_ylabel("Installierte Kapazität [GWh]")
+ax.set_xlabel("Jahr")
+ax.set_title("Installierte Speicherkapazität nach Technologie")
+ax.grid(True, linestyle="--", alpha=0.6)
+ax.legend(loc="upper left", frameon=True)
+
+plt.tight_layout()
+plt.show()
+
+
+#%% Liniendiagramm Kosten zur CO2-Reduktion
 
 # --- Daten vorbereiten ---
 # Kostenreihe (nur die Zeile "objective")
@@ -918,25 +1075,73 @@ em = em.sort_index()
 # y: Kosten relativ zu 2045
 y = 100 * costs / costs.loc[2045]
 
-# x: Reduktion gegenüber Startwert (z. B. 2025)
-baseline = em.loc[2025]   # oder dein gewünschtes Startjahr
-x = (baseline - em) / baseline * 100
+# x: Jahre
+x = y.index
+
+# CO₂-Reduktion berechnen für Labels
+baseline = em.loc[2025]
+reduction = (baseline - em) / baseline * 100
 
 # Jahre, die beide haben
-years = sorted(set(x.index).intersection(y.index))
+years = sorted(set(x).intersection(reduction.index))
 
 # --- Plot ---
 fig, ax = plt.subplots(figsize=(9,6))
-ax.plot(x.loc[years], y.loc[years], marker="o", linewidth=2)
+ax.plot(years, y.loc[years], marker="o", linewidth=2)
 
-ax.set_xlabel("CO₂-Reduktion [%]")
-ax.set_ylabel("Kosten (relativ zu 2045) [%]")
-ax.set_xlim(left=0)
+# Labels mit CO₂-Reduktion hinzufügen
+for year in years:
+    offset = -0.5 if year in [2035, 2040] else 0   # kleine Verschiebung für 58% & 75%
+    ax.text(
+        year + offset, y.loc[year] + 1,           # etwas oberhalb, ggf. nach links
+        f"{reduction.loc[year]:.0f}%",
+        ha="center", va="bottom", fontsize=10, fontweight="bold"
+    )
+
+# Achsenbeschriftungen
+ax.set_xlabel("Jahr")
+ax.set_ylabel("Zusatzkosten [%]")
+
+# Nur deine Jahre auf x-Achse
+ax.set_xticks(years)
+
 ax.set_ylim(bottom=0)
 ax.grid(True, linestyle="--", alpha=0.5)
-plt.title("Kosten zur CO₂-Reduktion")
+plt.title("Zusätzliche Kosten zur CO₂-Reduktion (relativ zu 2045)")
 plt.tight_layout()
 plt.show()
+
+# --- Plot ---
+fig, ax = plt.subplots(figsize=(9,6))
+line, = ax.plot(years, y.loc[years], marker="o", linewidth=2, label="Zusatzkosten")
+
+# Labels mit CO₂-Reduktion hinzufügen
+for year in years:
+    offset = -0.5 if year in [2035, 2040] else 0
+    ax.text(
+        year + offset, y.loc[year] + 1,
+        f"{reduction.loc[year]:.0f}%",
+        ha="center", va="bottom", fontsize=10, fontweight="bold"
+    )
+
+# Dummy-Eintrag für Legende (100% CO₂-Reduktion)
+dummy = plt.Line2D([], [], color="none", label="(100%) CO₂-Reduktion")
+
+# Achsenbeschriftungen
+ax.set_xlabel("Jahr")
+ax.set_ylabel("Zusatzkosten [%]")
+
+ax.set_xticks(years)
+ax.set_ylim(bottom=0)
+ax.grid(True, linestyle="--", alpha=0.5)
+plt.title("Zusätzliche Kosten zur CO₂-Reduktion (relativ zu 2045)")
+
+# Legende – Linie zuerst, Dummy darunter
+ax.legend(handles=[line, dummy], loc="upper left", frameon=True)
+
+plt.tight_layout()
+plt.show()
+
 
 
 #%% Diagramm alle wichtigen Komponenten in einem / Übersicht
